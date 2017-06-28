@@ -1,0 +1,12 @@
+flags: {}
+resolver: lts-8.5
+packages:
+- location: .
+- location:
+    git: git@github.com:timbod7/adl.git
+    commit: 179d410c6b7958c1a743197db6b0d5d12103ec85
+  subdirs:
+  - haskell/utils
+  - haskell/runtime
+  - haskell/compiler-lib
+  extra-dep: true

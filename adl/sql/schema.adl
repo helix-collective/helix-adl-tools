@@ -1,0 +1,39 @@
+module sql.schema
+{
+import sys.types.Maybe;
+
+// Types to represent a relational database schema
+
+type PrimitiveType = String;
+
+struct ForeignKeyRef {
+  String table;
+  String column;
+};
+
+struct Column {
+   String name;
+   PrimitiveType ctype;
+   String comment;
+   Bool primaryKey;
+   Bool nullable;
+   Maybe<ForeignKeyRef> references;
+};
+
+struct UniqueConstraint {
+   Vector<String> columns;
+};
+
+struct Table {
+   String name;
+   Vector<Column> columns;
+   Vector<UniqueConstraint> uniqueConstraints;
+   Json annotation;
+};
+
+struct Schema {
+   Vector<String> adlModules;
+   Vector<Table> tables;
+};
+
+};
