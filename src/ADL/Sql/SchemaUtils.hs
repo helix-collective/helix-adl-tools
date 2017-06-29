@@ -33,7 +33,7 @@ schemaFromAdl mkColumn mod = Schema
   , schema_tables = tables
   }
   where
-    tables = map (mkTable mkColumn) (mapMaybe matchDBTable ( M.elems ( m_decls mod)))
+    tables = map (mkTable mkColumn) (mapMaybe matchDBTable (M.elems (m_decls mod)))
 
 instance Monoid Schema where
   mempty = Schema [] []
@@ -110,35 +110,61 @@ mkTable mkColumn (decl,struct,ann) = Table
     fromLitString (JS.String s) = s
     fromLitBool (JS.Bool b) = b
 
+type BoundTypeVariables = M.Map Ident RTypeExpr
+
 columnFromField :: RField -> Column
-columnFromField field = mkColumn (f_type field)
+columnFromField field = mkColumn M.empty False (f_type field)
   where
-    mkColumn :: RTypeExpr -> Column
-    mkColumn  (TypeExpr (RT_Named (sn,_)) [te]) | sn == maybeType = (mkColumn1 te){column_nullable=True}
-    mkColumn (TypeExpr (RT_Primitive P_Nullable) [te]) = (mkColumn1 te){column_nullable=True}
-    mkColumn te = mkColumn1 te
+    mkColumn :: BoundTypeVariables -> Bool -> RTypeExpr -> Column
 
-    mkColumn1 :: RTypeExpr -> Column
-    mkColumn1 te@(TypeExpr (RT_Primitive p) _) =
-      mkColumn2 (primColumnType p)
-    mkColumn1 (TypeExpr (RT_Named (sn1,_)) [TypeExpr (RT_Named (sn2,_)) []]) | sn1 ==  dbKeyType =
-      (mkColumn2 "text"){column_references=Just (ForeignKeyRef (dbName (sn_name sn2)) "id")}
-    mkColumn1 (TypeExpr (RT_Named (sn,_)) [])  | sn == instantType =
-      mkColumn2 "timestamp"
-    mkColumn1 (TypeExpr (RT_Named (sn,_)) [])  | sn == localDateType =
-      mkColumn2 "date"
-    mkColumn1 (TypeExpr ref               [])  | isEnumeration2 ref =
-      mkColumn2 "text"
-    mkColumn1 _ = mkColumn2 "json"
+    -- First consider Maybe<> and Nullable<> as they will switch the column
+    -- to support nulls
+    mkColumn btv False (TypeExpr (RT_Named (sn,_)) [te]) | sn == maybeType = mkColumn btv True te
+    mkColumn btv False (TypeExpr (RT_Primitive P_Nullable) [te]) = mkColumn btv True te
 
-    mkColumn2 ctype = Column
+    -- Now consider the special cases for DbKey<>, Instant, LocalDate, and enumerations
+    mkColumn _ nullable (TypeExpr (RT_Named (sn1,_)) [TypeExpr (RT_Named (sn2,_)) []]) | sn1 ==  dbKeyType =
+      (mkPrimColumn nullable "text"){column_references=Just (ForeignKeyRef (dbName (sn_name sn2)) "id")}
+    mkColumn _ nullable (TypeExpr (RT_Named (sn,_)) [])  | sn == instantType =
+      mkPrimColumn nullable "timestamp"
+    mkColumn _ nullable (TypeExpr (RT_Named (sn,_)) [])  | sn == localDateType =
+      mkPrimColumn nullable "date"
+    mkColumn _ nullable (TypeExpr ref [])  | isEnumeration2 ref =
+      mkPrimColumn nullable "text"
+
+    -- typedefs and newtypes are expanded, doing the right thing with type parameters
+    mkColumn btv nullable (TypeExpr (RT_Named (_,Decl{d_type=Decl_Typedef t})) tes) =
+      let btv' = createBoundTypeVariables btv (t_typeParams t) (tes)
+      in mkColumn btv' nullable (t_typeExpr t)
+    mkColumn btv nullable (TypeExpr (RT_Named (_,Decl{d_type=Decl_Newtype n})) tes) =
+      let btv' = createBoundTypeVariables btv (n_typeParams n) (tes)
+      in mkColumn btv' nullable (n_typeExpr n)
+    mkColumn btv nullable (TypeExpr (RT_Param p) []) =
+      let te = case M.lookup p btv of
+             Nothing -> error ("BUG: unknown type variable " <> (T.unpack p))
+             Just te -> te
+      in mkColumn btv nullable te
+
+    -- Primitives
+    mkColumn _ nullable te@(TypeExpr (RT_Primitive p) _) =
+      mkPrimColumn nullable (primColumnType p)
+
+    -- For any other types, just store as json
+    mkColumn _ nullable _ =
+      mkPrimColumn nullable "json"
+
+    mkPrimColumn :: Bool -> T.Text -> Column
+    mkPrimColumn nullable ctype = Column
      { column_name = dbName (f_name field)
      , column_ctype = ctype
      , column_comment = typeExprText (f_type field)
      , column_primaryKey = False
-     , column_nullable = False
+     , column_nullable = nullable
      , column_references = Nothing
      }
+
+createBoundTypeVariables :: BoundTypeVariables -> [Ident] -> [RTypeExpr] -> BoundTypeVariables
+createBoundTypeVariables btv names types = M.union btv (M.fromList (zip names types))
 
 primColumnType p =  case p of
   P_String -> "text"
@@ -151,7 +177,7 @@ primColumnType p =  case p of
   P_Word32 -> "integer"
   P_Word64 -> "bigint"
   P_Float -> "real"
-  P_Double -> "double"
+  P_Double -> "double precision"
   P_Bool -> "boolean"
   _ -> "json"
 
