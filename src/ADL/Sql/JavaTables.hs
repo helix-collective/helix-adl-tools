@@ -333,10 +333,18 @@ dbType0 mod te = case resolveNewType mod te of
   Nothing -> dbType1 mod te
 
 dbType1 :: Module -> TypeExpr -> DbType0
-dbType1 mod (TypeExpr (TypeRef_reference t) [te]) | t ==  dbKeyType = Ref te
-dbType1 mod (TypeExpr (TypeRef_reference t) [])  | t == instantType = Timestamp
-dbType1 mod (TypeExpr (TypeRef_reference t) [])  | t == localDateType = Date
-dbType1 mod (TypeExpr ref                   [])  | isEnumeration mod ref = Enumeration
+
+dbType1 mod (TypeExpr (TypeRef_reference sn) [te])
+  | sn ==  dbKeyType = Ref te
+
+dbType1 mod te@(TypeExpr ref@(TypeRef_reference sn) [])
+  | sn == instantType = Timestamp
+  | sn == localDateType = Date
+  | isEnumeration mod ref = Enumeration
+  | otherwise = case resolveTypeDef mod sn of
+      (Just te') -> dbType1 mod te'
+      Nothing -> Json te
+
 dbType1 mod te@(TypeExpr (TypeRef_primitive p) _)
  | p == "String" = Primitive p "text"      "String"
  | p == "Int8"   = Primitive p "smalllint" "Integer"
@@ -351,6 +359,7 @@ dbType1 mod te@(TypeExpr (TypeRef_primitive p) _)
  | p == "Double" = Primitive p "double"    "Double"
  | p == "Bool"   = Primitive p "boolean"   "Boolean"
  | otherwise = Json te
+
 dbType1 mod te = Json te
 
 -- | A type is an enumeration if it's a union with all void fields.
@@ -367,6 +376,13 @@ resolveNewType mod (TypeExpr (TypeRef_reference sn@(ScopedName mname name)) []) 
      Just Decl{decl_type_=DeclType_newtype_ (NewType [] te _)} -> Just (sn,te)
      _ -> Nothing
 resolveNewType _ _ = Nothing
+
+resolveTypeDef :: Module -> ScopedName -> Maybe TypeExpr
+resolveTypeDef mod sn@(ScopedName mname name) | T.null mname
+  = case M.lookup name (module_decls mod) of
+     Just Decl{decl_type_=DeclType_type_ (TypeDef [] te )} -> Just te
+     _ -> Nothing
+resolveTypeDef _ _ = Nothing
 
 isVoidType :: TypeExpr -> Bool
 isVoidType (TypeExpr (TypeRef_primitive p) []) = p == "Void"
