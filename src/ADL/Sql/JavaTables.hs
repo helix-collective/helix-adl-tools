@@ -358,6 +358,7 @@ dbType1 mod te@(TypeExpr (TypeRef_primitive p) _)
  | p == "Float"  = Primitive p "real"      "Float"
  | p == "Double" = Primitive p "double"    "Double"
  | p == "Bool"   = Primitive p "boolean"   "Boolean"
+ | p == "Json"   = Primitive p "json"      "JsonElement"
  | otherwise = Json te
 
 dbType1 mod te = Json te
