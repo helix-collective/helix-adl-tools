@@ -24,10 +24,15 @@ struct UniqueConstraint {
    Vector<String> columns;
 };
 
+struct TableIndex {
+   Vector<String> columns;
+};
+
 struct Table {
    String name;
    Vector<Column> columns;
    Vector<UniqueConstraint> uniqueConstraints;
+   Vector<TableIndex> indexes;
    Json annotation;
 };
 

@@ -5,6 +5,7 @@ module ADL.Sql.Schema(
     PrimitiveType,
     Schema(..),
     Table(..),
+    TableIndex(..),
     UniqueConstraint(..),
 ) where
 
@@ -98,12 +99,13 @@ data Table = Table
     { table_name :: T.Text
     , table_columns :: [Column]
     , table_uniqueConstraints :: [UniqueConstraint]
+    , table_indexes :: [TableIndex]
     , table_annotation :: JS.Value
     }
     deriving (Prelude.Eq,Prelude.Show)
 
-mkTable :: T.Text -> [Column] -> [UniqueConstraint] -> JS.Value -> Table
-mkTable name columns uniqueConstraints annotation = Table name columns uniqueConstraints annotation
+mkTable :: T.Text -> [Column] -> [UniqueConstraint] -> [TableIndex] -> JS.Value -> Table
+mkTable name columns uniqueConstraints indexes annotation = Table name columns uniqueConstraints indexes annotation
 
 instance AdlValue Table where
     atype _ = "sql.schema.Table"
@@ -112,6 +114,7 @@ instance AdlValue Table where
         [ genField "name" table_name
         , genField "columns" table_columns
         , genField "uniqueConstraints" table_uniqueConstraints
+        , genField "indexes" table_indexes
         , genField "annotation" table_annotation
         ]
     
@@ -119,7 +122,26 @@ instance AdlValue Table where
         <$> parseField "name"
         <*> parseField "columns"
         <*> parseField "uniqueConstraints"
+        <*> parseField "indexes"
         <*> parseField "annotation"
+
+data TableIndex = TableIndex
+    { tableIndex_columns :: [T.Text]
+    }
+    deriving (Prelude.Eq,Prelude.Ord,Prelude.Show)
+
+mkTableIndex :: [T.Text] -> TableIndex
+mkTableIndex columns = TableIndex columns
+
+instance AdlValue TableIndex where
+    atype _ = "sql.schema.TableIndex"
+    
+    jsonGen = genObject
+        [ genField "columns" tableIndex_columns
+        ]
+    
+    jsonParser = TableIndex
+        <$> parseField "columns"
 
 data UniqueConstraint = UniqueConstraint
     { uniqueConstraint_columns :: [T.Text]

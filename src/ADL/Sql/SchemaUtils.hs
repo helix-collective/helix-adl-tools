@@ -73,7 +73,7 @@ tableDefSql table
         pad = T.replicate (max 1 (35 - T.length (column_name col <> sqltype))) " "
 
 tableConstraintsSql :: Table -> Code
-tableConstraintsSql table = rconstraints <> uconstraints
+tableConstraintsSql table = rconstraints <> uconstraints <> indexes
   where
     rconstraints = mconcat [ ctemplate "alter table $1 add constraint $1_$2_fk foreign key ($2) references $3($4);"
                              [table_name table, column_name col,ftable,fname]
@@ -81,6 +81,9 @@ tableConstraintsSql table = rconstraints <> uconstraints
     uconstraints = mconcat [ ctemplate "alter table $1 add constraint $1_$2_con unique ($3);"
                              [table_name table, T.pack (show i), T.intercalate ", " (map dbName uc)]
                            | (UniqueConstraint uc,i) <- zip (table_uniqueConstraints table) [1,2..]]
+    indexes      = mconcat [ ctemplate "create index $1_$2_idx on $1($3);"
+                             [table_name table, T.pack (show i), T.intercalate ", " (map dbName ti)]
+                           | (TableIndex ti,i) <- zip (table_indexes table) [1,2..]]
 
 
 mkTable :: (RField -> Column) -> DBTable -> Table
@@ -88,6 +91,7 @@ mkTable mkColumn (decl,struct,ann) = Table
   { table_name = dbName (d_name decl)
   , table_columns = idColumn <> map (setPrimaryKey . mkColumn) (s_fields struct)
   , table_uniqueConstraints = map UniqueConstraint uconstraints
+  , table_indexes = map TableIndex indexes
   , table_annotation = ann
   }
   where
@@ -96,10 +100,15 @@ mkTable mkColumn (decl,struct,ann) = Table
       Nothing -> []
       Just lit ->  fromLitArray (fromLitArray fromLitString) lit
 
+    indexes :: [[T.Text]]
+    indexes = case getLiteralField ann "indexes" of
+      Nothing -> []
+      Just lit ->  fromLitArray (fromLitArray fromLitString) lit
+
     idColumn :: [Column]
     idColumn = case getLiteralField ann "withIdPrimaryKey" of
-      Nothing -> []
-      Just lit ->  [Column "id" "text" "" True True Nothing]
+      Just (JS.Bool True) ->  [Column "id" "text" "" True True Nothing]
+      _ -> []
 
     setPrimaryKey :: Column -> Column
     setPrimaryKey col = case getLiteralField ann "withPrimaryKey" of

@@ -9,4 +9,5 @@ packages:
   - haskell/utils
   - haskell/runtime
   - haskell/compiler-lib
+  - haskell/compiler
   extra-dep: true
