@@ -107,6 +107,7 @@ generateJavaModel javaPackage mod (decl,struct,annotation)
   <> cline "import java.util.Optional;"
   <> cline "import java.util.function.Function;"
   <> cline ""
+  <> cline "@SuppressWarnings(\"all\")"
   <> ctemplate "public class $1 extends Table {" [tableClassName]
   <> indent
     (  ctemplate "public static final $1 $2 = new $1();" [tableClassName,staticVarName]
