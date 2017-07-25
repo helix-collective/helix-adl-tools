@@ -15,21 +15,22 @@ import qualified Data.Map as M
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Vector as V
+import qualified ADL.Compiler.AST as AST
 
 import ADL.Compiler.EIO
 import ADL.Compiler.Primitive
-import ADL.Compiler.Processing(RModule,defaultAdlFlags,loadAndCheckModule)
+import ADL.Compiler.Processing(AdlFlags(..),RModule,defaultAdlFlags,loadAndCheckModule1)
 import ADL.Compiler.Utils(FileWriter,writeOutputFile)
 import ADL.Compiler.ExternalAST(moduleToA2)
 import ADL.Compiler.Flags(Flags(..),parseArguments,standardOptions)
 import ADL.Utils.IndentedCode
-import ADL.Utils.Format(template)
+import ADL.Utils.Format(template,formatText)
 import ADL.Sys.Adlast
 import Cases(snakify)
 import Control.Monad.Trans(liftIO)
 import Data.Char(toUpper)
 import Data.Foldable(for_)
-import Data.List(intersperse)
+import Data.List(intersperse,find)
 import Data.Monoid
 import Data.Maybe(mapMaybe)
 import System.Directory(createDirectoryIfMissing)
@@ -37,15 +38,19 @@ import System.FilePath(takeDirectory,(</>))
 import System.Console.GetOpt(OptDescr(..), ArgDescr(..))
 
 data JavaTableFlags = JavaTableFlags {
+  jt_rtpackage :: T.Text,
   jt_package :: T.Text
 }
 
-defaultJavaTableFlags = JavaTableFlags "adl"
+defaultJavaTableFlags = JavaTableFlags "adl.runtime" "adl"
 
-javaTableOptions = [
-  Option "" ["package"]
-    (ReqArg (\s f -> f{f_backend=(f_backend f){jt_package=T.pack s}}) "PACKAGE")
-        "The  package into which the generated ADL code will be placed"
+javaTableOptions =
+  [ Option "" ["rtpackage"]
+      (ReqArg (\s f -> f{f_backend=(f_backend f){jt_rtpackage=T.pack s}}) "PACKAGE")
+      "The  package where the ADL runtime can be found"
+  , Option "" ["package"]
+      (ReqArg (\s f -> f{f_backend=(f_backend f){jt_package=T.pack s}}) "PACKAGE")
+      "The  package into which the generated ADL code will be placed"
   ]
 
 type DBTable = (Decl,Struct,Literal)
@@ -54,10 +59,11 @@ generateJavaTables :: [String] -> EIO T.Text ()
 generateJavaTables args = do
   (flags,paths) <- parseArguments header defaultAdlFlags defaultJavaTableFlags options args
   let fileWriter = writeOutputFile (f_output flags)
-
+      adlFlags = (f_adl flags){af_mergeFileExtensions=[".adl-java"] <> af_mergeFileExtensions (f_adl flags)}
   for_ paths $ \path -> do
-    rmodule <- loadAndCheckModule (f_adl flags) path
-    liftIO $ writeJavaTables fileWriter (f_backend flags)  rmodule
+    (mod,moddeps) <- loadAndCheckModule1 adlFlags path
+    let getJavaPackage = findJavaPackage (jt_package (f_backend flags)) (mod:moddeps)
+    liftIO $ writeJavaTables fileWriter (f_backend flags) getJavaPackage mod
   where
     header = "Usage: generate.hs java-tables ...args..."
     options =  standardOptions <> javaTableOptions
@@ -65,20 +71,21 @@ generateJavaTables args = do
 -- FIXME: This code is currently written in terms of the external ast (ie ADL.Sys.Adlast).
 -- It would be better in terms of the internal AST (ADL.Compiler.AST) and or schema class.
 
-writeJavaTables :: FileWriter -> JavaTableFlags -> RModule -> IO ()
-writeJavaTables writeFile flags rmod = for_ tableDecls $ \(decl,struct,annotation) -> do
-  let code = generateJavaModel javaPackage mod (decl,struct,annotation)
+writeJavaTables :: FileWriter -> JavaTableFlags -> (T.Text -> T.Text) -> RModule -> IO ()
+writeJavaTables writeFile flags getJavaPackage rmod = for_ tableDecls $ \(decl,struct,annotation) -> do
+  let code = generateJavaModel (jt_rtpackage flags) javaPackage commonDbPackage mod (decl,struct,annotation)
       text = (T.intercalate "\n" (codeText 1000 code))
       outputPath = pathFromPackage (javaPackage <> "." <> module_name mod <> "." <> javaTableClassName decl) <> ".java"
   writeFile outputPath (LBS.fromStrict (T.encodeUtf8 text))
   where
+    commonDbPackage = getJavaPackage "common.db"
     javaPackage = jt_package flags
     mod = moduleToA2 rmod
     pathFromPackage pkg = T.unpack (T.replace "." "/" pkg)
     tableDecls = mapMaybe matchDBTable ( M.elems (module_decls mod))
 
-generateJavaModel :: T.Text -> Module -> DBTable -> Code
-generateJavaModel javaPackage mod (decl,struct,annotation)
+generateJavaModel :: T.Text -> T.Text -> T.Text -> Module -> DBTable -> Code
+generateJavaModel rtPackage javaPackage commonDbPackage mod (decl,struct,annotation)
   =  cline "// Copyright 2017 Helix Collective Pty. Ltd."
   <> cline "// *GENERATED CODE*"
   <> cline ""
@@ -92,9 +99,9 @@ generateJavaModel javaPackage mod (decl,struct,annotation)
   <> cline "import au.com.helixta.nofrills.sql.Dsl.TypedField;"
   <> cline "import au.com.helixta.nofrills.sql.impl.DbResults;"
   <> cline ""
-  <> ctemplate "import $1.runtime.JsonBindings;" [javaPackage]
-  <> ctemplate "import $1.common.db.DbKey;" [javaPackage]
-  <> ctemplate "import $1.common.db.WithDbId;" [javaPackage]
+  <> ctemplate "import $1.JsonBindings;" [rtPackage]
+  <> ctemplate "import $1.DbKey;" [commonDbPackage]
+  <> ctemplate "import $1.WithDbId;" [commonDbPackage]
   <> cline ""
   <> cline "import com.google.common.collect.ImmutableMap;"
   <> cline "import com.google.common.collect.Maps;"
@@ -415,3 +422,13 @@ dbName = snakify
 
 getAnnotation :: Decl -> ScopedName -> Maybe Literal
 getAnnotation decl annotationName = M.lookup annotationName (decl_annotations decl)
+
+findJavaPackage :: T.Text -> [RModule] -> T.Text -> T.Text
+findJavaPackage defJavaPackage mods adlPackage
+  = case find (\mod -> formatText (AST.m_name mod) == adlPackage) mods of
+     Nothing -> defJavaPackage
+     (Just mod) -> case M.lookup snJavaPackage (AST.m_annotations mod) of
+       Just (_,JS.String pkg) -> pkg
+       Nothing -> defJavaPackage
+  where
+    snJavaPackage = AST.ScopedName (AST.ModuleName ["adlc","config","java"]) "JavaPackage"
