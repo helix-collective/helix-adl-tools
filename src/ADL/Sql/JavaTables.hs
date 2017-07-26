@@ -234,12 +234,11 @@ generateJavaModel rtPackage javaPackage commonDbPackage mod (decl,struct,annotat
     javaType (Json _) = "JsonElement"
 
     fromDbExpr :: TypeExpr -> T.Text -> T.Text
-    fromDbExpr te expr = case nullable of
-      Required -> fromDbExpr' dbt expr
-      Nullable -> template "Optional.ofNullable($1)" [fromDbExpr' dbt expr]
+    fromDbExpr te expr = case dbType mod te of
+      (Required,dbt) -> fromDbExpr' dbt expr
+      (Nullable,Json te) -> template "Optional.ofNullable($1).map($2::fromJson)" [expr,jsonBindingExpr te]
+      (Nullable,dbt) -> template "Optional.ofNullable($1)" [fromDbExpr' dbt expr]
       where
-        (nullable,dbt) = dbType mod te
-
         fromDbExpr' :: DbType0 -> T.Text -> T.Text
         fromDbExpr' (Primitive _ _ _) expr = expr
         fromDbExpr' Timestamp expr = expr
@@ -250,12 +249,11 @@ generateJavaModel rtPackage javaPackage commonDbPackage mod (decl,struct,annotat
         fromDbExpr' (Json te) expr = template "$1.fromJson($2)" [jsonBindingExpr te, expr]
 
     toDbExpr :: TypeExpr -> T.Text -> T.Text
-    toDbExpr te expr = case nullable of
-      Required -> toDbExpr' dbt expr
-      Nullable -> template "$1.orElse(null)" [toDbExpr' dbt expr]
+    toDbExpr te expr = case dbType mod te of
+      (Required,dbt) -> toDbExpr' dbt expr
+      (Nullable,Json te) -> template "($1.isPresent() ? $2.toJson($1.get()) : null)" [expr,jsonBindingExpr te]
+      (Nullable,dbt) -> template "$1.orElse(null)" [toDbExpr' dbt expr]
       where
-        (nullable,dbt) = dbType mod te
-
         toDbExpr' :: DbType0 -> T.Text -> T.Text
         toDbExpr' (Primitive _ _ _) expr = expr
         toDbExpr' Timestamp expr = expr
