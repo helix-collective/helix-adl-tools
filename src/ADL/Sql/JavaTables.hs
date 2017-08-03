@@ -236,7 +236,7 @@ generateJavaModel rtPackage javaPackage commonDbPackage mod (decl,struct,annotat
     fromDbExpr :: TypeExpr -> T.Text -> T.Text
     fromDbExpr te expr = case dbType mod te of
       (Required,dbt) -> fromDbExpr' dbt expr
-      (Nullable,Json te) -> template "Optional.ofNullable($1).map($2::fromJson)" [expr,jsonBindingExpr te]
+      (Nullable,Json te) -> template "Optional.ofNullable($1).map($2::fromJson)" [expr,jsonBindingExpr javaPackage te]
       (Nullable,dbt) -> template "Optional.ofNullable($1)" [fromDbExpr' dbt expr]
       where
         fromDbExpr' :: DbType0 -> T.Text -> T.Text
@@ -246,12 +246,12 @@ generateJavaModel rtPackage javaPackage commonDbPackage mod (decl,struct,annotat
         fromDbExpr' (DbNewtype (ScopedName _ name) dbt) expr = template "new $1($2)" [name,expr]
         fromDbExpr' (Ref te') expr = template "new DbKey<$1>($2)" [localClassName te',expr]
         fromDbExpr' Enumeration expr = template "$1.fromString($2)" [localClassName te, expr]
-        fromDbExpr' (Json te) expr = template "$1.fromJson($2)" [jsonBindingExpr te, expr]
+        fromDbExpr' (Json te) expr = template "$1.fromJson($2)" [jsonBindingExpr javaPackage te, expr]
 
     toDbExpr :: TypeExpr -> T.Text -> T.Text
     toDbExpr te expr = case dbType mod te of
       (Required,dbt) -> toDbExpr' dbt expr
-      (Nullable,Json te) -> template "($1.isPresent() ? $2.toJson($1.get()) : null)" [expr,jsonBindingExpr te]
+      (Nullable,Json te) -> template "($1.isPresent() ? $2.toJson($1.get()) : null)" [expr,jsonBindingExpr javaPackage te]
       (Nullable,dbt) -> template "$1.orElse(null)" [toDbExpr' dbt expr]
       where
         toDbExpr' :: DbType0 -> T.Text -> T.Text
@@ -261,7 +261,7 @@ generateJavaModel rtPackage javaPackage commonDbPackage mod (decl,struct,annotat
         toDbExpr' (DbNewtype (ScopedName _ name) dbt) expr = template "$1.getValue()" [expr]
         toDbExpr' (Ref _) expr = template "$1.getValue()" [expr]
         toDbExpr' Enumeration expr = template "$1.toString()" [expr]
-        toDbExpr' (Json te) expr = template "$1.toJson($2)" [jsonBindingExpr te, expr]
+        toDbExpr' (Json te) expr = template "$1.toJson($2)" [jsonBindingExpr javaPackage te, expr]
 
 dbTableType = ScopedName "common.db" "DbTable"
 dbKeyType = ScopedName "common.db" "DbKey"
@@ -298,16 +298,17 @@ localClassName :: TypeExpr -> T.Text
 localClassName (TypeExpr (TypeRef_reference (ScopedName mname name)) []) | T.null mname = name
 localClassName _ = "UNIMPLEMENTED(X)"
 
-jsonBindingExpr :: TypeExpr -> T.Text
-jsonBindingExpr (TypeExpr rt tes) =
+jsonBindingExpr :: T.Text -> TypeExpr -> T.Text
+jsonBindingExpr javaPackage (TypeExpr rt tes) =
   case rt of
-    (TypeRef_reference (ScopedName mname name)) | T.null mname
-      -> template "$1.jsonBinding($2)" [name,bparams]
+    (TypeRef_reference (ScopedName mname name)) 
+      | T.null mname -> template "$1.jsonBinding($2)" [name,bparams]
+      | otherwise    -> template "$1.$2.$3.jsonBinding($4)" [javaPackage, mname, name,bparams]
     (TypeRef_primitive p) | p == "Vector"
       -> template "JsonBindings.arrayList($1)" [bparams]
     _ -> template "UNIMPLEMENTED($1)" [T.pack (show rt)]
   where
-    bparams = T.intercalate ", " (map jsonBindingExpr tes)
+    bparams = T.intercalate ", " (map (jsonBindingExpr javaPackage) tes)
 
 -- Column type mapping:
 --    Anything that is a Maybe<T> maps to a nullable column
