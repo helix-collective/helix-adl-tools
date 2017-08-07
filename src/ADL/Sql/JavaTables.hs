@@ -12,6 +12,7 @@ import qualified Data.Aeson as JS
 import qualified Data.HashMap.Strict as HM
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Map as M
+import qualified Data.Set as S
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Vector as V
@@ -133,14 +134,14 @@ generateJavaModel rtPackage javaPackage commonDbPackage mod (decl,struct,annotat
     <> cline "}"
     <> cline ""
     <> mconcat
-      [  ctemplate "private final TypedField<$1> $2 = f(\"$3\", $1.class);" [fieldType,fieldName,colName]
-      <> ctemplate "public TypedField<$1> $2() { return $2; }" [fieldType,fieldName]
+      [  ctemplate "private final TypedField<$1> $2 = f(\"$3\", $1.class);" [fieldType,unreserveWord fieldName,colName]
+      <> ctemplate "public TypedField<$1> $2() { return $2; }" [fieldType,unreserveWord fieldName]
       <> cline ""
       |  (colName,fieldName,fieldType,_,_) <- allColumns]
     <> cline ""
     <> ctemplate "public static final ImmutableMap<String, Function<$1, TypedField<?>>> FIELDS = ImmutableMap.copyOf(m(" [tableClassName]
     <> indent (mconcat
-      [ ctemplate "e(\"$1\", t -> t.$1)$2" [fieldName,mcomma] | ((colName,fieldName,fieldType,_,_),mcomma) <- withCommas allColumns
+      [ ctemplate "e(\"$1\", t -> t.$2)$3" [fieldName,unreserveWord fieldName,mcomma] | ((colName,fieldName,fieldType,_,_),mcomma) <- withCommas allColumns
       ])
     <> cline "));"
     <> cline ""
@@ -158,7 +159,7 @@ generateJavaModel rtPackage javaPackage commonDbPackage mod (decl,struct,annotat
       = ctemplate "public $1 fromDbResults(DbResults res) {" [className]
       <> indent
         (  ctemplate "$1 result = new $1();" [className]
-        <> mconcat [ ctemplate "result.set$1($2);" [upper1 fieldName,fromDb (template "res.get($1())" [fieldName])]
+        <> mconcat [ ctemplate "result.set$1($2);" [upper1 fieldName,fromDb (template "res.get($1())" [unreserveWord fieldName])]
                    | (colName,fieldName,fieldType,fromDb,toDb) <- columns ]
         <> cline "return result;"
         )
@@ -168,7 +169,7 @@ generateJavaModel rtPackage javaPackage commonDbPackage mod (decl,struct,annotat
       = ctemplate "public WithDbId<$1> fromDbResults(DbResults res) {" [className]
       <> indent
         (  ctemplate "$1 result = new $1();" [className]
-        <> mconcat [ ctemplate "result.set$1($2);" [upper1 fieldName,fromDb (template "res.get($1())" [fieldName])]
+        <> mconcat [ ctemplate "result.set$1($2);" [upper1 fieldName,fromDb (template "res.get($1())" [unreserveWord fieldName])]
                    | (colName,fieldName,fieldType,fromDb,toDb) <- columns ]
         <> ctemplate "return new WithDbId<$1>(new DbKey<$1>(res.get(id())), result);" [className]
         )
@@ -205,7 +206,7 @@ generateJavaModel rtPackage javaPackage commonDbPackage mod (decl,struct,annotat
     columns = map generateCol (struct_fields struct)
 
     dbMappings
-      =  [ template "e($1(), $2)" [fieldName, toDb (template "value.get$1()" [upper1 fieldName])]
+      =  [ template "e($1(), $2)" [unreserveWord fieldName, toDb (template "value.get$1()" [upper1 fieldName])]
          | (colName,fieldName,fieldType,fromDb,toDb) <- columns ]
 
     generateCol :: Field -> (T.Text,T.Text,T.Text,T.Text->T.Text,T.Text->T.Text)
@@ -219,8 +220,8 @@ generateJavaModel rtPackage javaPackage commonDbPackage mod (decl,struct,annotat
 
     tableClassName = javaTableClassName decl
     className = javaClassName decl
-    tableName = dbName (decl_name decl)
-    staticVarName = T.toUpper tableName
+    tableName = dbTableName decl
+    staticVarName = T.toUpper (dbName (decl_name decl))
 
     javaFieldType :: TypeExpr -> T.Text
     javaFieldType te = javaType (snd (dbType mod te))
@@ -282,6 +283,13 @@ matchDBTable decl = case decl_type_ decl of
       (Just annotation) -> Just (decl,struct,annotation)
   _ -> Nothing
 
+dbTableName :: Decl -> T.Text
+dbTableName decl = case getAnnotation decl dbTableType of
+  (Just (Literal_object m)) -> case M.lookup "tableName" m of
+    (Just (Literal_string t)) -> t
+    _ -> dbName (decl_name decl)
+  _ -> dbName (decl_name decl)
+
 javaTableClassName :: Decl -> T.Text
 javaTableClassName decl = decl_name decl <> "Table"
 
@@ -301,7 +309,7 @@ localClassName _ = "UNIMPLEMENTED(X)"
 jsonBindingExpr :: T.Text -> TypeExpr -> T.Text
 jsonBindingExpr javaPackage (TypeExpr rt tes) =
   case rt of
-    (TypeRef_reference (ScopedName mname name)) 
+    (TypeRef_reference (ScopedName mname name))
       | T.null mname -> template "$1.jsonBinding($2)" [name,bparams]
       | otherwise    -> template "$1.$2.$3.jsonBinding($4)" [javaPackage, mname, name,bparams]
     (TypeRef_primitive p) | p == "Vector"
@@ -311,7 +319,7 @@ jsonBindingExpr javaPackage (TypeExpr rt tes) =
     bparams = T.intercalate ", " (map (jsonBindingExpr javaPackage) tes)
 
 -- Column type mapping:
---    Anything that is a Maybe<T> maps to a nullable column
+--    Anything that is a Maybe<T> or Nullable<T> maps to a nullable column
 --    Newtypes are expanded
 --    Enunerations (ie unions with only void branches) are stored as text
 --    DBRef<T> is a foreign key reference
@@ -332,6 +340,10 @@ data DbType0
 
 dbType :: Module -> TypeExpr -> DbType
 dbType mod (TypeExpr ref [te]) | ref == TypeRef_reference maybeType = (Nullable, dbType0 mod te)
+                               | ref == TypeRef_primitive "Nullable" = (Nullable, dbType0 mod te)
+dbType mod te@(TypeExpr ref@(TypeRef_reference sn) []) = case resolveTypeDef mod sn of
+  (Just te') -> dbType mod te'
+  Nothing -> (Required, dbType0 mod te)
 dbType mod te = (Required, dbType0 mod te)
 
 dbType0 :: Module -> TypeExpr -> DbType0
@@ -357,11 +369,11 @@ dbType1 mod te@(TypeExpr (TypeRef_primitive p) _)
  | p == "Int8"   = Primitive p "smalllint" "Integer"
  | p == "Int16"  = Primitive p "smalllint" "Integer"
  | p == "Int32"  = Primitive p "integer"   "Integer"
- | p == "Int64"  = Primitive p "bigint"    "BigInteger"
+ | p == "Int64"  = Primitive p "bigint"    "Long"
  | p == "Word8"  = Primitive p "smalllint" "Integer"
  | p == "Word16" = Primitive p "smalllint" "Integer"
  | p == "Word32" = Primitive p "integer"   "Integer"
- | p == "Word64" = Primitive p "bigint"    "BigInteger"
+ | p == "Word64" = Primitive p "bigint"    "Long"
  | p == "Float"  = Primitive p "real"      "Float"
  | p == "Double" = Primitive p "double"    "Double"
  | p == "Bool"   = Primitive p "boolean"   "Boolean"
@@ -431,3 +443,64 @@ findJavaPackage defJavaPackage mods adlPackage
        Nothing -> defJavaPackage
   where
     snJavaPackage = AST.ScopedName (AST.ModuleName ["adlc","config","java"]) "JavaPackage"
+
+reservedWords :: S.Set T.Text
+reservedWords = S.fromList
+ [ "abstract"
+ , "assert"
+ , "boolean"
+ , "break"
+ , "byte"
+ , "case"
+ , "catch"
+ , "char"
+ , "class"
+ , "const"
+ , "continue"
+ , "default"
+ , "do"
+ , "double"
+ , "else"
+ , "enum"
+ , "extends"
+ , "false"
+ , "final"
+ , "finally"
+ , "float"
+ , "for"
+ , "goto"
+ , "if"
+ , "implements"
+ , "import"
+ , "instanceof"
+ , "int"
+ , "interface"
+ , "long"
+ , "native"
+ , "new"
+ , "null"
+ , "package"
+ , "private"
+ , "protected"
+ , "public"
+ , "return"
+ , "short"
+ , "static"
+ , "strictfp"
+ , "super"
+ , "switch"
+ , "synchronized"
+ , "this"
+ , "throw"
+ , "throws"
+ , "transient"
+ , "true"
+ , "try"
+ , "void"
+ , "volatile"
+ , "while"
+ ]
+
+unreserveWord :: T.Text -> T.Text
+unreserveWord n | S.member n reservedWords = T.append n "_"
+                | otherwise = n

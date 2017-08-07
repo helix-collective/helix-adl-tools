@@ -88,13 +88,17 @@ tableConstraintsSql table = rconstraints <> uconstraints <> indexes
 
 mkTable :: (RField -> Column) -> DBTable -> Table
 mkTable mkColumn (decl,struct,ann) = Table
-  { table_name = dbName (d_name decl)
+  { table_name = tableName
   , table_columns = idColumn <> map (setPrimaryKey . mkColumn) (s_fields struct)
   , table_uniqueConstraints = map UniqueConstraint uconstraints
   , table_indexes = map TableIndex indexes
   , table_annotation = ann
   }
   where
+    tableName = case getLiteralField ann "tableName" of
+      Nothing -> dbName (d_name decl)
+      (Just lit) -> fromLitString lit
+
     uconstraints :: [[T.Text]]
     uconstraints = case getLiteralField ann "uniquenessConstraints" of
       Nothing -> []
