@@ -54,7 +54,7 @@ javaTableOptions =
       "The  package into which the generated ADL code will be placed"
   ]
 
-type DBTable = (Decl,Struct,Literal)
+type DBTable = (Decl,Struct,JS.Value)
 
 generateJavaTables :: [String] -> EIO T.Text ()
 generateJavaTables args = do
@@ -197,8 +197,8 @@ generateJavaModel rtPackage javaPackage commonDbPackage mod (decl,struct,annotat
          )
       <> cline "}"
 
-    hasPrimaryKey = case getLiteralField annotation "withIdPrimaryKey" of
-      (Just (Literal_boolean True)) -> True
+    hasPrimaryKey = case getAnnotationField annotation "withIdPrimaryKey" of
+      (Just (JS.Bool True)) -> True
       _ -> False
 
     allColumns = primaryKeyColumn <> columns
@@ -285,8 +285,8 @@ matchDBTable decl = case decl_type_ decl of
 
 dbTableName :: Decl -> T.Text
 dbTableName decl = case getAnnotation decl dbTableType of
-  (Just (Literal_object m)) -> case M.lookup "tableName" m of
-    (Just (Literal_string t)) -> t
+  (Just (JS.Object hm)) -> case HM.lookup "tableName" hm of
+    (Just (JS.String t)) -> t
     _ -> dbName (decl_name decl)
   _ -> dbName (decl_name decl)
 
@@ -408,9 +408,9 @@ isVoidType :: TypeExpr -> Bool
 isVoidType (TypeExpr (TypeRef_primitive p) []) = p == "Void"
 isVoidType _ = False
 
-getLiteralField :: Literal -> T.Text -> Maybe Literal
-getLiteralField (Literal_object map) field = M.lookup field map
-getLiteralField _ _ = Nothing
+getAnnotationField :: JS.Value -> T.Text -> Maybe JS.Value
+getAnnotationField (JS.Object hm) field = HM.lookup field hm
+getAnnotationField _ _ = Nothing
 
 withCommas :: [a] -> [(a,T.Text)]
 withCommas [] = []
@@ -431,7 +431,7 @@ typeRefText (TypeRef_reference (ScopedName mname name))
 dbName :: T.Text -> T.Text
 dbName = snakify
 
-getAnnotation :: Decl -> ScopedName -> Maybe Literal
+getAnnotation :: Decl -> ScopedName -> Maybe JS.Value
 getAnnotation decl annotationName = M.lookup annotationName (decl_annotations decl)
 
 findJavaPackage :: T.Text -> [RModule] -> T.Text -> T.Text
