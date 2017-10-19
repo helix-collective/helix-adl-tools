@@ -238,6 +238,7 @@ generateJavaModel rtPackage javaPackage commonDbPackage mod (decl,struct,annotat
     fromDbExpr te expr = case dbType mod te of
       (Required,dbt) -> fromDbExpr' dbt expr
       (Nullable,Json te) -> template "Optional.ofNullable($1).map($2::fromJson)" [expr,jsonBindingExpr javaPackage te]
+      (Nullable,Ref te') -> template "Optional.ofNullable($1).map(v -> new DbKey<$2>(v))" [expr, localClassName te']
       (Nullable,dbt) -> template "Optional.ofNullable($1)" [fromDbExpr' dbt expr]
       where
         fromDbExpr' :: DbType0 -> T.Text -> T.Text
@@ -253,6 +254,7 @@ generateJavaModel rtPackage javaPackage commonDbPackage mod (decl,struct,annotat
     toDbExpr te expr = case dbType mod te of
       (Required,dbt) -> toDbExpr' dbt expr
       (Nullable,Json te) -> template "($1.isPresent() ? $2.toJson($1.get()) : null)" [expr,jsonBindingExpr javaPackage te]
+      (Nullable,Ref _) -> template "$1.map(v -> v.getValue()).orElse(null)" [expr]
       (Nullable,dbt) -> template "$1.orElse(null)" [toDbExpr' dbt expr]
       where
         toDbExpr' :: DbType0 -> T.Text -> T.Text
