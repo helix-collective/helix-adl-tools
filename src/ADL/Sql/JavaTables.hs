@@ -212,7 +212,7 @@ generateJavaModel rtPackage javaPackage commonDbPackage mod (decl,struct,annotat
     generateCol :: Field -> (T.Text,T.Text,T.Text,T.Text->T.Text,T.Text->T.Text)
     generateCol field = (colName,fieldName,fieldType,fromDb,toDb)
       where
-        colName = dbName (field_name field)
+        colName = dbColumnName field
         fieldName = field_name field
         fieldType = javaFieldType (field_typeExpr field)
         fromDb expr = fromDbExpr (field_typeExpr field) expr
@@ -265,6 +265,7 @@ generateJavaModel rtPackage javaPackage commonDbPackage mod (decl,struct,annotat
         toDbExpr' (Json te) expr = template "$1.toJson($2)" [jsonBindingExpr javaPackage te, expr]
 
 dbTableType = ScopedName "common.db" "DbTable"
+dbColumnNameType = ScopedName "common.db" "DbColumnName"
 dbKeyType = ScopedName "common.db" "DbKey"
 instantType = ScopedName "common" "Instant"
 localDateType = ScopedName "common" "LocalDate"
@@ -278,17 +279,22 @@ maybeType = ScopedName "sys.types" "Maybe"
 matchDBTable :: Decl -> Maybe DBTable
 matchDBTable decl = case decl_type_ decl of
   (DeclType_struct_ struct) ->
-    case getAnnotation decl dbTableType of
+    case getAnnotation (decl_annotations decl) dbTableType of
       Nothing -> Nothing
       (Just annotation) -> Just (decl,struct,annotation)
   _ -> Nothing
 
 dbTableName :: Decl -> T.Text
-dbTableName decl = case getAnnotation decl dbTableType of
+dbTableName decl = case getAnnotation (decl_annotations decl) dbTableType of
   (Just (JS.Object hm)) -> case HM.lookup "tableName" hm of
     (Just (JS.String t)) -> t
     _ -> dbName (decl_name decl)
   _ -> dbName (decl_name decl)
+
+dbColumnName :: Field -> T.Text
+dbColumnName field = case getAnnotation (field_annotations field) dbColumnNameType of
+  (Just (JS.String t)) -> t
+  _ -> dbName (field_name field)
 
 javaTableClassName :: Decl -> T.Text
 javaTableClassName decl = decl_name decl <> "Table"
@@ -431,8 +437,8 @@ typeRefText (TypeRef_reference (ScopedName mname name))
 dbName :: T.Text -> T.Text
 dbName = snakify
 
-getAnnotation :: Decl -> ScopedName -> Maybe JS.Value
-getAnnotation decl annotationName = M.lookup annotationName (decl_annotations decl)
+getAnnotation :: Annotations -> ScopedName -> Maybe JS.Value
+getAnnotation annotations annotationName = M.lookup annotationName annotations
 
 findJavaPackage :: T.Text -> [RModule] -> T.Text -> T.Text
 findJavaPackage defJavaPackage mods adlPackage

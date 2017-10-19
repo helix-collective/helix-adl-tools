@@ -24,6 +24,7 @@ import Data.Maybe(mapMaybe)
 
 type RTypeExpr = TypeExpr ResolvedType
 type RField = Field ResolvedType
+type RAnnotations = Annotations ResolvedType
 type DBTable = (RDecl,Struct ResolvedType,JS.Value)
 
 -- Build an abstract db schema from an ADL module
@@ -166,9 +167,13 @@ columnFromField field = mkColumn M.empty False (f_type field)
     mkColumn _ nullable _ =
       mkPrimColumn nullable "json"
 
+    columnName = case getAnnotation (f_annotations field) dbColumnNameType of
+      Just (JS.String columnName) -> columnName
+      Nothing -> dbName (f_name field)
+
     mkPrimColumn :: Bool -> T.Text -> Column
     mkPrimColumn nullable ctype = Column
-     { column_name = dbName (f_name field)
+     { column_name = columnName
      , column_ctype = ctype
      , column_comment = typeExprText (f_type field)
      , column_primaryKey = False
@@ -199,13 +204,13 @@ primColumnType p =  case p of
 matchDBTable :: RDecl -> Maybe DBTable
 matchDBTable decl = case d_type decl of
   (Decl_Struct struct) ->
-    case getAnnotation decl dbTableType of
+    case getAnnotation (d_annotations decl) dbTableType of
       Nothing -> Nothing
       (Just annotation) -> Just (decl,struct,annotation)
   _ -> Nothing
 
-getAnnotation :: RDecl -> ScopedName -> Maybe JS.Value
-getAnnotation decl annotationName = snd <$> (M.lookup annotationName (d_annotations decl))
+getAnnotation :: RAnnotations -> ScopedName -> Maybe JS.Value
+getAnnotation annotations annotationName = snd <$> (M.lookup annotationName annotations)
 
 typeExprText :: RTypeExpr -> T.Text
 typeExprText (TypeExpr tr [])  = typeRefText tr
@@ -237,6 +242,7 @@ withCommas [l] = [(l," ")]
 withCommas (l:ls) = (l,","):withCommas ls
 
 dbTableType = ScopedName (ModuleName ["common","db"]) "DbTable"
+dbColumnNameType = ScopedName (ModuleName ["common","db"]) "DbColumnName"
 dbKeyType = ScopedName (ModuleName ["common","db"]) "DbKey"
 pkType = ScopedName (ModuleName ["common","db"]) "PK"
 instantType = ScopedName (ModuleName ["common"]) "Instant"
