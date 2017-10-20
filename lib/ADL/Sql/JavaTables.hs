@@ -20,7 +20,7 @@ import qualified ADL.Compiler.AST as AST
 
 import ADL.Compiler.EIO
 import ADL.Compiler.Primitive
-import ADL.Compiler.Processing(AdlFlags(..),RModule,defaultAdlFlags,loadAndCheckModule1)
+import ADL.Compiler.Processing(AdlFlags(..),RModule,defaultAdlFlags,loadAndCheckModule1,expandModuleTypedefs)
 import ADL.Compiler.Utils(FileWriter,writeOutputFile)
 import ADL.Compiler.ExternalAST(moduleToA2)
 import ADL.Compiler.Flags(Flags(..),parseArguments,standardOptions)
@@ -81,7 +81,7 @@ writeJavaTables writeFile flags getJavaPackage rmod = for_ tableDecls $ \(decl,s
   where
     commonDbPackage = getJavaPackage "common.db"
     javaPackage = jt_package flags
-    mod = moduleToA2 rmod
+    mod = moduleToA2 (expandModuleTypedefs rmod)
     pathFromPackage pkg = T.unpack (T.replace "." "/" pkg)
     tableDecls = mapMaybe matchDBTable ( M.elems (module_decls mod))
 
@@ -349,9 +349,6 @@ data DbType0
 dbType :: Module -> TypeExpr -> DbType
 dbType mod (TypeExpr ref [te]) | ref == TypeRef_reference maybeType = (Nullable, dbType0 mod te)
                                | ref == TypeRef_primitive "Nullable" = (Nullable, dbType0 mod te)
-dbType mod te@(TypeExpr ref@(TypeRef_reference sn) []) = case resolveTypeDef mod sn of
-  (Just te') -> dbType mod te'
-  Nothing -> (Required, dbType0 mod te)
 dbType mod te = (Required, dbType0 mod te)
 
 dbType0 :: Module -> TypeExpr -> DbType0
@@ -368,9 +365,7 @@ dbType1 mod te@(TypeExpr ref@(TypeRef_reference sn) [])
   | sn == instantType = Timestamp
   | sn == localDateType = Date
   | isEnumeration mod ref = Enumeration
-  | otherwise = case resolveTypeDef mod sn of
-      (Just te') -> dbType1 mod te'
-      Nothing -> Json te
+  | otherwise = Json te
 
 dbType1 mod te@(TypeExpr (TypeRef_primitive p) _)
  | p == "String" = Primitive p "text"      "String"
@@ -404,13 +399,6 @@ resolveNewType mod (TypeExpr (TypeRef_reference sn@(ScopedName mname name)) []) 
      Just Decl{decl_type_=DeclType_newtype_ (NewType [] te _)} -> Just (sn,te)
      _ -> Nothing
 resolveNewType _ _ = Nothing
-
-resolveTypeDef :: Module -> ScopedName -> Maybe TypeExpr
-resolveTypeDef mod sn@(ScopedName mname name) | T.null mname
-  = case M.lookup name (module_decls mod) of
-     Just Decl{decl_type_=DeclType_type_ (TypeDef [] te )} -> Just te
-     _ -> Nothing
-resolveTypeDef _ _ = Nothing
 
 isVoidType :: TypeExpr -> Bool
 isVoidType (TypeExpr (TypeRef_primitive p) []) = p == "Void"
