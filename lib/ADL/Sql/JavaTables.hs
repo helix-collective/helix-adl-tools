@@ -63,7 +63,7 @@ generateJavaTables args = do
       adlFlags = (f_adl flags){af_mergeFileExtensions=[".adl-java"] <> af_mergeFileExtensions (f_adl flags)}
   for_ paths $ \path -> do
     (mod,moddeps) <- loadAndCheckModule1 adlFlags path
-    let getJavaPackage = findJavaPackage (jt_package (f_backend flags)) (mod:moddeps)
+    let getJavaPackage = findJavaPackage (jt_rtpackage (f_backend flags)) (jt_package (f_backend flags)) (mod:moddeps)
     liftIO $ writeJavaTables fileWriter (f_backend flags) getJavaPackage mod
   where
     header = "Usage: generate.hs java-tables ...args..."
@@ -72,25 +72,23 @@ generateJavaTables args = do
 -- FIXME: This code is currently written in terms of the external ast (ie ADL.Sys.Adlast).
 -- It would be better in terms of the internal AST (ADL.Compiler.AST) and or schema class.
 
-writeJavaTables :: FileWriter -> JavaTableFlags -> (T.Text -> T.Text) -> RModule -> IO ()
+writeJavaTables :: FileWriter -> JavaTableFlags -> JavaPackageFn -> RModule -> IO ()
 writeJavaTables writeFile flags getJavaPackage rmod = for_ tableDecls $ \(decl,struct,annotation) -> do
-  let code = generateJavaModel (jt_rtpackage flags) javaPackage commonDbPackage mod (decl,struct,annotation)
+  let code = generateJavaModel (jt_rtpackage flags) getJavaPackage mod (decl,struct,annotation)
       text = (T.intercalate "\n" (codeText 1000 code))
-      outputPath = pathFromPackage (javaPackage <> "." <> module_name mod <> "." <> javaTableClassName decl) <> ".java"
+      outputPath = pathFromPackage (getJavaPackage (module_name mod) <> "." <> javaTableClassName decl) <> ".java"
   writeFile outputPath (LBS.fromStrict (T.encodeUtf8 text))
   where
-    commonDbPackage = getJavaPackage "common.db"
-    javaPackage = jt_package flags
     mod = moduleToA2 (expandModuleTypedefs rmod)
     pathFromPackage pkg = T.unpack (T.replace "." "/" pkg)
     tableDecls = mapMaybe matchDBTable ( M.elems (module_decls mod))
 
-generateJavaModel :: T.Text -> T.Text -> T.Text -> Module -> DBTable -> Code
-generateJavaModel rtPackage javaPackage commonDbPackage mod (decl,struct,annotation)
+generateJavaModel :: T.Text -> JavaPackageFn -> Module -> DBTable -> Code
+generateJavaModel rtPackage getJavaPackage mod (decl,struct,annotation)
   =  cline "// Copyright 2017 Helix Collective Pty. Ltd."
   <> cline "// *GENERATED CODE*"
   <> cline ""
-  <> ctemplate "package $1;" [javaPackage <> "." <> module_name mod]
+  <> ctemplate "package $1;" [getJavaPackage (module_name mod)]
   <> cline ""
   <> cline "import static au.com.helixta.util.common.collect.Mapx.e;"
   <> cline "import static au.com.helixta.util.common.collect.Mapx.m;"
@@ -101,8 +99,8 @@ generateJavaModel rtPackage javaPackage commonDbPackage mod (decl,struct,annotat
   <> cline "import au.com.helixta.nofrills.sql.impl.DbResults;"
   <> cline ""
   <> ctemplate "import $1.JsonBindings;" [rtPackage]
-  <> ctemplate "import $1.DbKey;" [commonDbPackage]
-  <> ctemplate "import $1.WithDbId;" [commonDbPackage]
+  <> ctemplate "import $1.DbKey;" [getJavaPackage "common.db"]
+  <> ctemplate "import $1.WithDbId;" [getJavaPackage "common.db"]
   <> cline ""
   <> cline "import com.google.common.collect.ImmutableMap;"
   <> cline "import com.google.common.collect.Maps;"
@@ -237,7 +235,7 @@ generateJavaModel rtPackage javaPackage commonDbPackage mod (decl,struct,annotat
     fromDbExpr :: TypeExpr -> T.Text -> T.Text
     fromDbExpr te expr = case dbType mod te of
       (Required,dbt) -> fromDbExpr' dbt expr
-      (Nullable,Json te) -> template "Optional.ofNullable($1).map($2::fromJson)" [expr,jsonBindingExpr javaPackage te]
+      (Nullable,Json te) -> template "Optional.ofNullable($1).map($2::fromJson)" [expr,jsonBindingExpr getJavaPackage te]
       (Nullable,Ref te') -> template "Optional.ofNullable($1).map(v -> new DbKey<$2>(v))" [expr, localClassName te']
       (Nullable,dbt) -> template "Optional.ofNullable($1)" [fromDbExpr' dbt expr]
       where
@@ -248,12 +246,12 @@ generateJavaModel rtPackage javaPackage commonDbPackage mod (decl,struct,annotat
         fromDbExpr' (DbNewtype (ScopedName _ name) dbt) expr = template "new $1($2)" [name,expr]
         fromDbExpr' (Ref te') expr = template "new DbKey<$1>($2)" [localClassName te',expr]
         fromDbExpr' Enumeration expr = template "$1.fromString($2)" [localClassName te, expr]
-        fromDbExpr' (Json te) expr = template "$1.fromJson($2)" [jsonBindingExpr javaPackage te, expr]
+        fromDbExpr' (Json te) expr = template "$1.fromJson($2)" [jsonBindingExpr getJavaPackage te, expr]
 
     toDbExpr :: TypeExpr -> T.Text -> T.Text
     toDbExpr te expr = case dbType mod te of
       (Required,dbt) -> toDbExpr' dbt expr
-      (Nullable,Json te) -> template "($1.isPresent() ? $2.toJson($1.get()) : null)" [expr,jsonBindingExpr javaPackage te]
+      (Nullable,Json te) -> template "($1.isPresent() ? $2.toJson($1.get()) : null)" [expr,jsonBindingExpr getJavaPackage te]
       (Nullable,Ref _) -> template "$1.map(v -> v.getValue()).orElse(null)" [expr]
       (Nullable,dbt) -> template "$1.orElse(null)" [toDbExpr' dbt expr]
       where
@@ -264,7 +262,7 @@ generateJavaModel rtPackage javaPackage commonDbPackage mod (decl,struct,annotat
         toDbExpr' (DbNewtype (ScopedName _ name) dbt) expr = template "$1.getValue()" [expr]
         toDbExpr' (Ref _) expr = template "$1.getValue()" [expr]
         toDbExpr' Enumeration expr = template "$1.toString()" [expr]
-        toDbExpr' (Json te) expr = template "$1.toJson($2)" [jsonBindingExpr javaPackage te, expr]
+        toDbExpr' (Json te) expr = template "$1.toJson($2)" [jsonBindingExpr getJavaPackage te, expr]
 
 dbTableType = ScopedName "common.db" "DbTable"
 dbColumnNameType = ScopedName "common.db" "DbColumnName"
@@ -314,17 +312,17 @@ localClassName :: TypeExpr -> T.Text
 localClassName (TypeExpr (TypeRef_reference (ScopedName mname name)) []) | T.null mname = name
 localClassName _ = "UNIMPLEMENTED(X)"
 
-jsonBindingExpr :: T.Text -> TypeExpr -> T.Text
-jsonBindingExpr javaPackage (TypeExpr rt tes) =
+jsonBindingExpr :: JavaPackageFn -> TypeExpr -> T.Text
+jsonBindingExpr getJavaPackage (TypeExpr rt tes) =
   case rt of
     (TypeRef_reference (ScopedName mname name))
       | T.null mname -> template "$1.jsonBinding($2)" [name,bparams]
-      | otherwise    -> template "$1.$2.$3.jsonBinding($4)" [javaPackage, mname, name,bparams]
+      | otherwise    -> template "$1.$2.jsonBinding($3)" [getJavaPackage mname, name, bparams]
     (TypeRef_primitive p) | p == "Vector"
       -> template "JsonBindings.arrayList($1)" [bparams]
     _ -> template "UNIMPLEMENTED($1)" [T.pack (show rt)]
   where
-    bparams = T.intercalate ", " (map (jsonBindingExpr javaPackage) tes)
+    bparams = T.intercalate ", " (map (jsonBindingExpr getJavaPackage) tes)
 
 -- Column type mapping:
 --    Anything that is a Maybe<T> or Nullable<T> maps to a nullable column
@@ -430,13 +428,17 @@ dbName = snakify
 getAnnotation :: Annotations -> ScopedName -> Maybe JS.Value
 getAnnotation annotations annotationName = M.lookup annotationName annotations
 
-findJavaPackage :: T.Text -> [RModule] -> T.Text -> T.Text
-findJavaPackage defJavaPackage mods adlPackage
-  = case find (\mod -> formatText (AST.m_name mod) == adlPackage) mods of
-     Nothing -> defJavaPackage
-     (Just mod) -> case M.lookup snJavaPackage (AST.m_annotations mod) of
-       Just (_,JS.String pkg) -> pkg
-       Nothing -> defJavaPackage
+type JavaPackageFn = T.Text -> T.Text
+
+findJavaPackage :: T.Text -> T.Text -> [RModule] -> JavaPackageFn
+findJavaPackage rtJavaPackage defJavaPackage mods adlPackage =
+  case T.isPrefixOf "sys." adlPackage of
+    True -> rtJavaPackage <> "." <> adlPackage
+    False -> case find (\mod -> formatText (AST.m_name mod) == adlPackage) mods of
+      Nothing -> defJavaPackage <> "." <> adlPackage
+      (Just mod) -> case M.lookup snJavaPackage (AST.m_annotations mod) of
+        Just (_,JS.String pkg) -> pkg
+        Nothing -> defJavaPackage <> "." <> adlPackage
   where
     snJavaPackage = AST.ScopedName (AST.ModuleName ["adlc","config","java"]) "JavaPackage"
 
