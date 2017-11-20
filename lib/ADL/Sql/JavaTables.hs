@@ -40,10 +40,11 @@ import System.Console.GetOpt(OptDescr(..), ArgDescr(..))
 
 data JavaTableFlags = JavaTableFlags {
   jt_rtpackage :: T.Text,
-  jt_package :: T.Text
+  jt_package :: T.Text,
+  jt_crudfns :: Bool
 }
 
-defaultJavaTableFlags = JavaTableFlags "adl.runtime" "adl"
+defaultJavaTableFlags = JavaTableFlags "adl.runtime" "adl" False
 
 javaTableOptions =
   [ Option "" ["rtpackage"]
@@ -52,6 +53,9 @@ javaTableOptions =
   , Option "" ["package"]
       (ReqArg (\s f -> f{f_backend=(f_backend f){jt_package=T.pack s}}) "PACKAGE")
       "The  package into which the generated ADL code will be placed"
+  , Option "" ["crudfns"]
+      (NoArg (\f -> f{f_backend=(f_backend f){jt_crudfns=True}}))
+      "Generate CRUD helper functions"
   ]
 
 type DBTable = (Decl,Struct,JS.Value)
@@ -74,7 +78,7 @@ generateJavaTables args = do
 
 writeJavaTables :: FileWriter -> JavaTableFlags -> JavaPackageFn -> RModule -> IO ()
 writeJavaTables writeFile flags getJavaPackage rmod = for_ tableDecls $ \(decl,struct,annotation) -> do
-  let code = generateJavaModel (jt_rtpackage flags) getJavaPackage mod (decl,struct,annotation)
+  let code = generateJavaModel flags getJavaPackage mod (decl,struct,annotation)
       text = (T.intercalate "\n" (codeText 1000 code))
       outputPath = pathFromPackage (getJavaPackage (module_name mod) <> "." <> javaTableClassName decl) <> ".java"
   writeFile outputPath (LBS.fromStrict (T.encodeUtf8 text))
@@ -83,8 +87,8 @@ writeJavaTables writeFile flags getJavaPackage rmod = for_ tableDecls $ \(decl,s
     pathFromPackage pkg = T.unpack (T.replace "." "/" pkg)
     tableDecls = mapMaybe matchDBTable ( M.elems (module_decls mod))
 
-generateJavaModel :: T.Text -> JavaPackageFn -> Module -> DBTable -> Code
-generateJavaModel rtPackage getJavaPackage mod (decl,struct,annotation)
+generateJavaModel :: JavaTableFlags -> JavaPackageFn -> Module -> DBTable -> Code
+generateJavaModel flags getJavaPackage mod (decl,struct,annotation)
   =  cline "// Copyright 2017 Helix Collective Pty. Ltd."
   <> cline "// *GENERATED CODE*"
   <> cline ""
@@ -93,12 +97,14 @@ generateJavaModel rtPackage getJavaPackage mod (decl,struct,annotation)
   <> cline "import static au.com.helixta.util.common.collect.Mapx.e;"
   <> cline "import static au.com.helixta.util.common.collect.Mapx.m;"
   <> cline ""
+  <> cline "import au.com.helixta.nofrills.sql.Dsl;"
   <> cline "import au.com.helixta.nofrills.sql.Dsl.Table;"
   <> cline "import au.com.helixta.nofrills.sql.Dsl.FieldRef;"
   <> cline "import au.com.helixta.nofrills.sql.Dsl.TypedField;"
   <> cline "import au.com.helixta.nofrills.sql.impl.DbResults;"
+  <> cline "import au.com.helixta.util.sql.QueryHelper;"
   <> cline ""
-  <> ctemplate "import $1.JsonBindings;" [rtPackage]
+  <> ctemplate "import $1.JsonBindings;" [jt_rtpackage flags]
   <> ctemplate "import $1.DbKey;" [getJavaPackage "common.db"]
   <> ctemplate "import $1.WithDbId;" [getJavaPackage "common.db"]
   <> cline ""
@@ -112,6 +118,7 @@ generateJavaModel rtPackage getJavaPackage mod (decl,struct,annotation)
   <> cline "import java.util.Map;"
   <> cline "import java.util.Optional;"
   <> cline "import java.util.function.Function;"
+  <> cline "import java.util.function.Supplier;"
   <> cline ""
   <> cline "@SuppressWarnings(\"all\")"
   <> ctemplate "public class $1 extends Table {" [tableClassName]
@@ -150,6 +157,7 @@ generateJavaModel rtPackage getJavaPackage mod (decl,struct,annotation)
     <> (if hasPrimaryKey then fromDbResultsWithIdCode else fromDbResultsCode)
     <> cline ""
     <> (if hasPrimaryKey then dbMappingWithIdCode else dbMappingCode)
+    <> (if hasPrimaryKey && jt_crudfns flags then cline "" <> crudHelperFns else mempty)
     )
   <> cline "};"
   where
@@ -193,6 +201,41 @@ generateJavaModel rtPackage getJavaPackage mod (decl,struct,annotation)
             )
          <> cline ");"
          )
+      <> cline "}"
+
+    crudHelperFns
+      =  ctemplate "public DbKey<$1> create(Supplier<String> idSupplier, QueryHelper.Context ctx, $1 value) {" [className]
+      <> ctemplate "  DbKey<$1> id = new DbKey<>(idSupplier.get());" [className]
+      <> cline "  Dsl.Insert insert = Dsl.insert(this).mappings(dbMapping(id, value));"
+      <> cline "  ctx.execute(insert);"
+      <> cline "  return id;"
+      <> cline "}"
+      <> cline ""
+      <> ctemplate " public Optional<$1> read(QueryHelper.Context ctx, DbKey<$1> id) {" [className]
+      <> cline "  Dsl.Select select ="
+      <> cline "          Dsl.select(allFields().values())"
+      <> cline "                  .from(this)"
+      <> cline "                  .where(id().eq(id.getValue()));"
+      <> cline "  DbResults dbResults = ctx.query(select);"
+      <> cline "  while (dbResults.next()) {"
+      <> cline "    return Optional.of(fromDbResults(dbResults).getValue());"
+      <> cline "  }"
+      <> cline "  return Optional.empty();"
+      <> cline "}"
+      <> cline ""
+      <> ctemplate "public void update(QueryHelper.Context ctx, DbKey<$1> id, $1 value) {" [className]
+      <> cline "  Dsl.Update update ="
+      <> cline "    Dsl.update(this)"
+      <> cline "    .set(this.dbMapping(id,value))"
+      <> cline "    .where(id().eq(id.getValue()));"
+      <> cline "  ctx.execute(update);"
+      <> cline "}"
+      <> cline ""
+      <> ctemplate "public void delete(QueryHelper.Context ctx, DbKey<$1> id) {" [className]
+      <> cline "  Dsl.Delete delete ="
+      <> cline "    Dsl.delete(this)"
+      <> cline "    .where(id().eq(id.getValue()));"
+      <> cline "  ctx.execute(delete);"
       <> cline "}"
 
     hasPrimaryKey = case getAnnotationField annotation "withIdPrimaryKey" of
