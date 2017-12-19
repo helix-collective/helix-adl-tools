@@ -22,14 +22,13 @@ data Column = Column
     { column_name :: T.Text
     , column_ctype :: PrimitiveType
     , column_comment :: T.Text
-    , column_primaryKey :: Prelude.Bool
     , column_nullable :: Prelude.Bool
     , column_references :: (ADL.Sys.Types.Maybe ForeignKeyRef)
     }
     deriving (Prelude.Eq,Prelude.Ord,Prelude.Show)
 
-mkColumn :: T.Text -> PrimitiveType -> T.Text -> Prelude.Bool -> Prelude.Bool -> (ADL.Sys.Types.Maybe ForeignKeyRef) -> Column
-mkColumn name ctype comment primaryKey nullable references = Column name ctype comment primaryKey nullable references
+mkColumn :: T.Text -> PrimitiveType -> T.Text -> Prelude.Bool -> (ADL.Sys.Types.Maybe ForeignKeyRef) -> Column
+mkColumn name ctype comment nullable references = Column name ctype comment nullable references
 
 instance AdlValue Column where
     atype _ = "sql.schema.Column"
@@ -38,7 +37,6 @@ instance AdlValue Column where
         [ genField "name" column_name
         , genField "ctype" column_ctype
         , genField "comment" column_comment
-        , genField "primaryKey" column_primaryKey
         , genField "nullable" column_nullable
         , genField "references" column_references
         ]
@@ -47,7 +45,6 @@ instance AdlValue Column where
         <$> parseField "name"
         <*> parseField "ctype"
         <*> parseField "comment"
-        <*> parseField "primaryKey"
         <*> parseField "nullable"
         <*> parseField "references"
 
@@ -98,14 +95,15 @@ instance AdlValue Schema where
 data Table = Table
     { table_name :: T.Text
     , table_columns :: [Column]
+    , table_primaryKey :: [T.Text]
     , table_uniqueConstraints :: [UniqueConstraint]
     , table_indexes :: [TableIndex]
     , table_annotation :: JS.Value
     }
     deriving (Prelude.Eq,Prelude.Show)
 
-mkTable :: T.Text -> [Column] -> [UniqueConstraint] -> [TableIndex] -> JS.Value -> Table
-mkTable name columns uniqueConstraints indexes annotation = Table name columns uniqueConstraints indexes annotation
+mkTable :: T.Text -> [Column] -> [T.Text] -> [UniqueConstraint] -> [TableIndex] -> JS.Value -> Table
+mkTable name columns primaryKey uniqueConstraints indexes annotation = Table name columns primaryKey uniqueConstraints indexes annotation
 
 instance AdlValue Table where
     atype _ = "sql.schema.Table"
@@ -113,6 +111,7 @@ instance AdlValue Table where
     jsonGen = genObject
         [ genField "name" table_name
         , genField "columns" table_columns
+        , genField "primaryKey" table_primaryKey
         , genField "uniqueConstraints" table_uniqueConstraints
         , genField "indexes" table_indexes
         , genField "annotation" table_annotation
@@ -121,6 +120,7 @@ instance AdlValue Table where
     jsonParser = Table
         <$> parseField "name"
         <*> parseField "columns"
+        <*> parseField "primaryKey"
         <*> parseField "uniqueConstraints"
         <*> parseField "indexes"
         <*> parseField "annotation"

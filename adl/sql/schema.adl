@@ -15,7 +15,6 @@ struct Column {
    String name;
    PrimitiveType ctype;
    String comment;
-   Bool primaryKey;
    Bool nullable;
    Maybe<ForeignKeyRef> references;
 };
@@ -31,6 +30,7 @@ struct TableIndex {
 struct Table {
    String name;
    Vector<Column> columns;
+   Vector<String> primaryKey;
    Vector<UniqueConstraint> uniqueConstraints;
    Vector<TableIndex> indexes;
    Json annotation;

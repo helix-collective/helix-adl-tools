@@ -57,21 +57,26 @@ tableDefSql :: Table -> Code
 tableDefSql table
   =  ctemplate "create table $1(" [table_name table]
   <> indent (mconcat
-       [ sqlFromColumn col mcomma
-       | (col,mcomma) <- withCommas (table_columns table)]
+       [ linefn mcomma | (linefn,mcomma) <- withCommas linefns]
      )
   <> cline ");"
   where
+    linefns
+      =  map sqlFromColumn (table_columns table)
+      <> mkPrimaryKey
+
     sqlFromColumn col mcomma = cline (column_name col <> " " <> sqltype <> mcomma <> comment)
       where
-        sqltype = column_ctype col <> pkey <> nullable
-        pkey | column_primaryKey col = " primary key"
-             | otherwise = ""
+        sqltype = column_ctype col <> nullable
         nullable | column_nullable col = ""
                  | otherwise = " not null"
         comment | column_comment col == "" = ""
                 | otherwise                = template "$1-- $2" [pad,column_comment col]
         pad = T.replicate (max 1 (35 - T.length (column_name col <> sqltype))) " "
+
+    mkPrimaryKey = case table_primaryKey table of
+       [] -> []
+       pk -> [\mcomma -> cline (template "PRIMARY KEY($1)" [T.intercalate ", " pk])]
 
 tableConstraintsSql :: Table -> Code
 tableConstraintsSql table = rconstraints <> uconstraints <> indexes
@@ -90,9 +95,10 @@ tableConstraintsSql table = rconstraints <> uconstraints <> indexes
 mkTable :: (RField -> Column) -> DBTable -> Table
 mkTable mkColumn (decl,struct,ann) = Table
   { table_name = tableName
-  , table_columns = idColumn <> map (setPrimaryKey . mkColumn) (s_fields struct)
+  , table_columns = idColumn <> map mkColumn (s_fields struct)
   , table_uniqueConstraints = map UniqueConstraint uconstraints
   , table_indexes = map TableIndex indexes
+  , table_primaryKey = primaryKey
   , table_annotation = ann
   }
   where
@@ -112,13 +118,16 @@ mkTable mkColumn (decl,struct,ann) = Table
 
     idColumn :: [Column]
     idColumn = case getLiteralField ann "withIdPrimaryKey" of
-      Just (JS.Bool True) ->  [Column "id" "text" "" True True Nothing]
+      Just (JS.Bool True) ->  [Column "id" "text" "" True Nothing]
       _ -> []
 
-    setPrimaryKey :: Column -> Column
-    setPrimaryKey col = case getLiteralField ann "withPrimaryKey" of
-      Nothing -> col
-      Just lit ->  col{column_primaryKey=dbName (fromLitString lit) == column_name col}
+    primaryKey :: [T.Text]
+    primaryKey = case getLiteralField ann "withPrimaryKey" of
+      Just (JS.String k) ->  [k]
+      Just lit@(JS.Array _) -> fromLitArray fromLitString lit
+      Nothing -> case getLiteralField ann "withIdPrimaryKey" of
+        Nothing -> []
+        _ -> ["id":: T.Text]
 
     fromLitArray f (JS.Array a) = map f (V.toList a)
     fromLitString (JS.String s) = s
@@ -176,7 +185,6 @@ columnFromField field = mkColumn M.empty False (f_type field)
      { column_name = columnName
      , column_ctype = ctype
      , column_comment = typeExprText (f_type field)
-     , column_primaryKey = False
      , column_nullable = nullable
      , column_references = Nothing
      }

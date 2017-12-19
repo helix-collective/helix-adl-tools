@@ -1,5 +1,12 @@
-#!/bin/sh
+#!/bin/bash
 set -e
 ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"/..
-stack build adl-compiler
-stack exec adlc -- haskell -O $ROOT/src --package=ADL $ROOT/adl/sql/Schema.adl
+
+if [ "${NIX_PATH-}" ]; then
+    STACK="stack --nix"
+else
+    STACK="stack"
+fi
+
+$STACK build adl-compiler
+$STACK exec adlc -- haskell -O $ROOT/lib --package=ADL $ROOT/adl/sql/schema.adl
