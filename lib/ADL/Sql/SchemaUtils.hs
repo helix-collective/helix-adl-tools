@@ -118,7 +118,7 @@ mkTable mkColumn (decl,struct,ann) = Table
 
     idColumn :: [Column]
     idColumn = case getLiteralField ann "withIdPrimaryKey" of
-      Just (JS.Bool True) ->  [Column "id" "text" "" True Nothing]
+      Just (JS.Bool True) ->  [Column "id" "text" "" False Nothing]
       _ -> []
 
     primaryKey :: [T.Text]
@@ -126,8 +126,8 @@ mkTable mkColumn (decl,struct,ann) = Table
       Just (JS.String k) ->  [k]
       Just lit@(JS.Array _) -> fromLitArray fromLitString lit
       Nothing -> case getLiteralField ann "withIdPrimaryKey" of
-        Nothing -> []
-        _ -> ["id":: T.Text]
+        Just (JS.Bool True) -> ["id":: T.Text]
+        _ -> []
 
     fromLitArray f (JS.Array a) = map f (V.toList a)
     fromLitString (JS.String s) = s
