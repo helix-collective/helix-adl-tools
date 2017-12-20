@@ -76,7 +76,7 @@ tableDefSql table
 
     mkPrimaryKey = case table_primaryKey table of
        [] -> []
-       pk -> [\mcomma -> cline (template "PRIMARY KEY($1)" [T.intercalate ", " pk])]
+       pk -> [\mcomma -> cline (template "primary key($1)" [T.intercalate ", " pk])]
 
 tableConstraintsSql :: Table -> Code
 tableConstraintsSql table = rconstraints <> uconstraints <> indexes
