@@ -2,7 +2,6 @@
 
 module ADL.Sql.JavaTables(
     generateJavaTables
-  , writeJavaTables
   , javaTableOptions
   , defaultJavaTableFlags
   , JavaTableFlags(..)
@@ -17,20 +16,27 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Vector as V
 import qualified ADL.Compiler.AST as AST
+import qualified ADL.Compiler.Backends.Java.Internal as J
+import qualified ADL.Compiler.Backends.Java.Json as J
+import qualified ADL.Compiler.Backends.Java as J
+import qualified ADL.Sql.SchemaUtils as SC
+import qualified ADL.Sql.Schema as SC
+
 
 import ADL.Compiler.EIO
 import ADL.Compiler.Primitive
-import ADL.Compiler.Processing(AdlFlags(..),RModule,defaultAdlFlags,loadAndCheckModule1,expandModuleTypedefs)
+import ADL.Compiler.Processing(AdlFlags(..),ResolvedType, RModule,RDecl,defaultAdlFlags,loadAndCheckModule1,removeModuleTypedefs, expandModuleTypedefs, associateCustomTypes, refEnumeration, refNewtype, ResolvedTypeT(..))
 import ADL.Compiler.Utils(FileWriter,writeOutputFile)
-import ADL.Compiler.ExternalAST(moduleToA2)
-import ADL.Compiler.Flags(Flags(..),parseArguments,standardOptions)
+import ADL.Compiler.Flags(Flags(..),parseArguments,standardOptions, addToMergeFileExtensions)
 import ADL.Utils.IndentedCode
 import ADL.Utils.Format(template,formatText)
-import ADL.Sys.Adlast
 import Cases(snakify)
+import Control.Monad(when)
 import Control.Monad.Trans(liftIO)
-import Data.Char(toUpper)
+import Control.Monad.Trans.State.Strict
+import Data.Char(toUpper, isUpper)
 import Data.Foldable(for_)
+import Data.Traversable(for)
 import Data.List(intersperse,find)
 import Data.Monoid
 import Data.Maybe(mapMaybe)
@@ -58,392 +64,353 @@ javaTableOptions =
       "Generate CRUD helper functions"
   ]
 
-type DBTable = (Decl,Struct,JS.Value)
+type DBTable = (J.CDecl,AST.Struct J.CResolvedType,SC.Table,JS.Value)
 
+-- | CLI sub command to read arguments and a list ADL files
+-- and generate java code mappinging between ADL objects
+-- and database tables
 generateJavaTables :: [String] -> EIO T.Text ()
 generateJavaTables args = do
-  (flags,paths) <- parseArguments header defaultAdlFlags defaultJavaTableFlags options args
+  let header = "Usage: generate.hs java-tables ...args..."
+      options =  standardOptions <> javaTableOptions
+  (flags0,paths) <- parseArguments header defaultAdlFlags defaultJavaTableFlags options args
   let fileWriter = writeOutputFile (f_output flags)
-      adlFlags = (f_adl flags){af_mergeFileExtensions=[".adl-java"] <> af_mergeFileExtensions (f_adl flags)}
+      flags = addToMergeFileExtensions "adl-java" flags0
+      cgp = J.defaultCodeGenProfile{J.cgp_runtimePackage=(J.javaPackage (jt_rtpackage (f_backend flags)))}
   for_ paths $ \path -> do
-    (mod,moddeps) <- loadAndCheckModule1 adlFlags path
-    let getJavaPackage = findJavaPackage (jt_rtpackage (f_backend flags)) (jt_package (f_backend flags)) (mod:moddeps)
-    liftIO $ writeJavaTables fileWriter (f_backend flags) getJavaPackage mod
-  where
-    header = "Usage: generate.hs java-tables ...args..."
-    options =  standardOptions <> javaTableOptions
+    (mod0,moddeps) <- loadAndCheckModule1 (f_adl flags) path
+    let javaPackageFn = J.mkJavaPackageFn cgp (mod0:moddeps) (J.javaPackage (jt_package (f_backend flags)))
+        schema = SC.schemaFromAdl SC.columnFromField mod0
+        mod = ( associateCustomTypes J.getCustomType (AST.m_name mod0)
+              . removeModuleTypedefs
+              . expandModuleTypedefs
+              ) mod0
+    liftIO $ writeModuleJavaTables fileWriter (f_backend flags) cgp javaPackageFn schema mod
 
--- FIXME: This code is currently written in terms of the external ast (ie ADL.Sys.Adlast).
--- It would be better in terms of the internal AST (ADL.Compiler.AST) and or schema class.
+-- | Generate the java table mapping code for a resolved ADL module
+writeModuleJavaTables :: FileWriter -> JavaTableFlags -> J.CodeGenProfile -> J.JavaPackageFn -> SC.Schema -> J.CModule -> IO ()
+writeModuleJavaTables writeFile jtflags cgp javaPackageFn schema rmod = do
+  let tableDecls = mapMaybe (matchDBTable schema) (M.elems (AST.m_decls rmod))
+  for_ tableDecls $ \(decl,struct,table,annotation) -> do
+    let filePath = J.javaClassFilePath (J.javaClass (javaPackageFn (AST.m_name rmod)) (tableClassName decl))
+        classfile = generateJavaModel jtflags cgp javaPackageFn rmod (decl,struct,table,annotation)
+        text = (T.intercalate "\n" (codeText 1000 (J.classFileCode classfile)))
+    writeFile filePath (LBS.fromStrict (T.encodeUtf8 text))
 
-writeJavaTables :: FileWriter -> JavaTableFlags -> JavaPackageFn -> RModule -> IO ()
-writeJavaTables writeFile flags getJavaPackage rmod = for_ tableDecls $ \(decl,struct,annotation) -> do
-  let code = generateJavaModel flags getJavaPackage mod (decl,struct,annotation)
-      text = (T.intercalate "\n" (codeText 1000 code))
-      outputPath = pathFromPackage (getJavaPackage (module_name mod) <> "." <> javaTableClassName decl) <> ".java"
-  writeFile outputPath (LBS.fromStrict (T.encodeUtf8 text))
-  where
-    mod = moduleToA2 (expandModuleTypedefs rmod)
-    pathFromPackage pkg = T.unpack (T.replace "." "/" pkg)
-    tableDecls = mapMaybe matchDBTable ( M.elems (module_decls mod))
+lookupTable :: T.Text -> SC.Schema -> SC.Table
+lookupTable name schema = case find (\t -> SC.table_name t == name) (SC.schema_tables schema) of
+  Nothing -> error ("Can't find schema table for " <> T.unpack name)
+  Just t -> t
 
-generateJavaModel :: JavaTableFlags -> JavaPackageFn -> Module -> DBTable -> Code
-generateJavaModel flags getJavaPackage mod (decl,struct,annotation)
-  =  cline "// Copyright 2017 Helix Collective Pty. Ltd."
-  <> cline "// *GENERATED CODE*"
-  <> cline ""
-  <> ctemplate "package $1;" [getJavaPackage (module_name mod)]
-  <> cline ""
-  <> cline "import static au.com.helixta.util.common.collect.Mapx.e;"
-  <> cline "import static au.com.helixta.util.common.collect.Mapx.m;"
-  <> cline ""
-  <> cline "import au.com.helixta.nofrills.sql.Dsl;"
-  <> cline "import au.com.helixta.nofrills.sql.Dsl.Table;"
-  <> cline "import au.com.helixta.nofrills.sql.Dsl.FieldRef;"
-  <> cline "import au.com.helixta.nofrills.sql.Dsl.TypedField;"
-  <> cline "import au.com.helixta.nofrills.sql.impl.DbResults;"
-  <> cline "import au.com.helixta.util.sql.QueryHelper;"
-  <> cline ""
-  <> ctemplate "import $1.JsonBindings;" [jt_rtpackage flags]
-  <> ctemplate "import $1.DbKey;" [getJavaPackage "common.db"]
-  <> ctemplate "import $1.WithDbId;" [getJavaPackage "common.db"]
-  <> cline ""
-  <> cline "import com.google.common.collect.ImmutableMap;"
-  <> cline "import com.google.common.collect.Maps;"
-  <> cline "import com.google.gson.JsonElement;"
-  <> cline "import com.google.gson.JsonPrimitive;"
-  <> cline ""
-  <> cline "import javax.annotation.Nullable;"
-  <> cline ""
-  <> cline "import java.util.Map;"
-  <> cline "import java.util.Optional;"
-  <> cline "import java.util.function.Function;"
-  <> cline "import java.util.function.Supplier;"
-  <> cline ""
-  <> cline "@SuppressWarnings(\"all\")"
-  <> ctemplate "public class $1 extends Table {" [tableClassName]
-  <> indent
-    (  ctemplate "public static final $1 $2 = new $1();" [tableClassName,staticVarName]
-    <> cline ""
-    <> ctemplate "public $1() {" [tableClassName]
-    <> indent (ctemplate "super(\"$1\");" [tableName])
-    <> cline "}"
-    <> cline ""
-    <> ctemplate "public $1(String alias) {" [tableClassName]
-    <> indent (ctemplate "super(\"$1\", alias);" [tableName])
-    <> cline "}"
-    <> cline ""
-    <> cline "//exposed to enable postgres views that extend tables"
-    <> ctemplate "protected $1(String tablename, @Nullable String alias) {" [tableClassName]
-    <> indent (cline "super(tablename, alias);")
-    <> cline "}"
-    <> cline ""
-    <> mconcat
-      [  ctemplate "private final TypedField<$1> $2 = f(\"$3\", $1.class);" [fieldType,unreserveWord fieldName,colName]
-      <> ctemplate "public TypedField<$1> $2() { return $2; }" [fieldType,unreserveWord fieldName]
-      <> cline ""
-      |  (colName,fieldName,fieldType,_,_) <- allColumns]
-    <> cline ""
-    <> ctemplate "public static final ImmutableMap<String, Function<$1, TypedField<?>>> FIELDS = ImmutableMap.copyOf(m(" [tableClassName]
-    <> indent (mconcat
-      [ ctemplate "e(\"$1\", t -> t.$2)$3" [fieldName,unreserveWord fieldName,mcomma] | ((colName,fieldName,fieldType,_,_),mcomma) <- withCommas allColumns
-      ])
-    <> cline "));"
-    <> cline ""
-    <> cline "public Map<String, TypedField<?>> allFields() {"
-    <> indent (cline "return Maps.transformValues(FIELDS, f -> f.apply(this));")
-    <> cline "}"
-    <> cline ""
-    <> (if hasPrimaryKey then fromDbResultsWithIdCode else fromDbResultsCode)
-    <> cline ""
-    <> (if hasPrimaryKey then dbMappingWithIdCode else dbMappingCode)
-    <> (if hasPrimaryKey && jt_crudfns flags then cline "" <> crudHelperFns else mempty)
-    )
-  <> cline "};"
+generateJavaModel :: JavaTableFlags -> J.CodeGenProfile -> J.JavaPackageFn -> J.CModule -> DBTable -> J.ClassFile
+generateJavaModel jtflags cgp javaPackageFn mod (decl,struct,table,dbTableAnnotation) = execState gen state0
   where
-    fromDbResultsCode
-      = ctemplate "public $1 fromDbResults(DbResults res) {" [className]
-      <> indent
-        (  ctemplate "$1 result = new $1();" [className]
-        <> mconcat [ ctemplate "result.set$1($2);" [upper1 fieldName,fromDb (template "res.get($1())" [unreserveWord fieldName])]
-                   | (colName,fieldName,fieldType,fromDb,toDb) <- columns ]
-        <> cline "return result;"
+    state0 = J.classFile cgp (AST.m_name mod) javaPackageFn classDecl
+    tableClassNameT = tableClassName decl
+    tableInstanceNameT = T.toUpper (snakify (AST.d_name decl))
+    classDecl = "@SuppressWarnings(\"all\")\npublic class " <> tableClassNameT <> " extends Table"
+    javaClassNameT = javaClassName decl
+    dbTableNameT = dbTableName decl
+    gen = do
+      J.addImport "au.com.helixta.nofrills.sql.Dsl"
+      J.addImport "au.com.helixta.nofrills.sql.Dsl.Table"
+      J.addImport "au.com.helixta.nofrills.sql.Dsl.FieldRef"
+      J.addImport "au.com.helixta.nofrills.sql.Dsl.TypedField"
+      J.addImport "au.com.helixta.nofrills.sql.impl.DbResults"
+      J.addImport "au.com.helixta.util.sql.QueryHelper"
+      J.addImport "au.com.helixta.adl.runtime.JsonBindings"
+      J.addImport "com.google.common.collect.ImmutableMap"
+      J.addImport "com.google.common.collect.Maps"
+      J.addImport "com.google.gson.JsonElement"
+      J.addImport "com.google.gson.JsonPrimitive"
+      J.addImport "javax.annotation.Nullable"
+      J.addImport "java.util.Map"
+      J.addImport "java.util.Optional"
+      J.addImport "java.util.function.Function"
+      J.addImport "java.util.function.Supplier"
+      J.addImport "au.com.helixta.util.common.collect.Mapx"
+
+      J.addMethod (ctemplate "public static final $1 $2 = new $1();" [tableClassNameT, tableInstanceNameT])
+
+      J.addMethod (cblock (template "public $1()" [tableClassNameT]) (
+        ctemplate "super(\"$1\");" [dbTableNameT]
+        ))
+
+      J.addMethod (cblock (template "public $1(String alias)" [tableClassNameT]) (
+        ctemplate "super(\"$1\", alias);" [dbTableNameT]
+        ))
+
+      J.addMethod
+        (  cline "//exposed to enable postgres views that extend tables"
+        <> cblock (template "protected $1(String tablename, @Nullable String alias)" [tableClassNameT]) (
+             ctemplate "super(tablename, alias);" [dbTableNameT]
+           )
         )
-      <> cline "}"
 
-    fromDbResultsWithIdCode
-      = ctemplate "public WithDbId<$1> fromDbResults(DbResults res) {" [className]
-      <> indent
-        (  ctemplate "$1 result = new $1();" [className]
-        <> mconcat [ ctemplate "result.set$1($2);" [upper1 fieldName,fromDb (template "res.get($1())" [unreserveWord fieldName])]
-                   | (colName,fieldName,fieldType,fromDb,toDb) <- columns ]
-        <> ctemplate "return new WithDbId<$1>(new DbKey<$1>(res.get(id())), result);" [className]
+      let withIdPrimaryKey = length (SC.table_columns table) /= length (AST.s_fields struct)
+          dbColumns = mkDbColumns withIdPrimaryKey (SC.table_columns table) (AST.s_fields struct)
+
+
+      for_ dbColumns $ \dbc -> do
+        let javaFieldNameT = javaFieldName dbc
+            (columnName,javaDbTypeT) = case dbc of
+              (IdColumn col) -> (SC.column_name col,"String")
+              (DbColumn col field) -> (SC.column_name col, javaDbType col field)
+        J.addMethod
+          (  ctemplate "private final TypedField<$2> $1 = f(\"$3\", $2.class);"
+                        [javaFieldNameT, javaDbTypeT, columnName]
+          <> ctemplate "public TypedField<$2> $1() { return $1; }"
+                        [javaFieldNameT, javaDbTypeT]
+          )
+
+      J.addMethod
+        ( ctemplate "public static final ImmutableMap<String, Function<$1, TypedField<?>>> FIELDS = ImmutableMap.copyOf(Mapx.m("
+                     [tableClassNameT]
+        <> indent (mconcat [ ctemplate "Mapx.e(\"$1\", t -> t.$1)$2" [javaFieldName dbc,mcomma]
+                           | (dbc,mcomma) <- withCommas dbColumns])
+        <> cline "));"
         )
-      <> cline "}"
 
-    dbMappingCode
-      = ctemplate "public Map<? extends FieldRef, ? extends Object> dbMapping($1 value) {" [className]
-      <> indent
-         (  cline "return m("
-         <> indent
-            (  mconcat [ cline (mapping <> mcomma) | (mapping,mcomma) <- withCommas dbMappings]
-            )
-         <> cline ");"
-         )
-      <> cline "}"
+      J.addMethod
+        ( cblock "public Map<String, TypedField<?>> allFields()"
+          (cline "return Maps.transformValues(FIELDS, f -> f.apply(this));")
+        )
 
-    dbMappingWithIdCode
-      = ctemplate "public Map<? extends FieldRef, ? extends Object> dbMapping(DbKey<$1> id, $1 value) {" [className]
-      <> indent
-         (  cline "return m("
-         <> indent
-            (  mconcat [ cline (mapping <> mcomma) | (mapping,mcomma) <- withCommas (["e(id(), id.getValue())"] <> dbMappings)]
-            )
-         <> cline ");"
-         )
-      <> cline "}"
+      let withIdPrimaryKey = case getAnnotationField dbTableAnnotation "withIdPrimaryKey" of
+            (Just (JS.Bool True)) -> True
+            _ -> False
 
-    crudHelperFns
-      =  ctemplate "public DbKey<$1> create(Supplier<String> idSupplier, QueryHelper.Context ctx, $1 value) {" [className]
-      <> ctemplate "  DbKey<$1> id = new DbKey<>(idSupplier.get());" [className]
-      <> cline "  Dsl.Insert insert = Dsl.insert(this).mappings(dbMapping(id, value));"
-      <> cline "  ctx.execute(insert);"
-      <> cline "  return id;"
-      <> cline "}"
-      <> cline ""
-      <> ctemplate " public Optional<$1> read(QueryHelper.Context ctx, DbKey<$1> id) {" [className]
-      <> cline "  Dsl.Select select ="
-      <> cline "          Dsl.select(allFields().values())"
-      <> cline "                  .from(this)"
-      <> cline "                  .where(id().eq(id.getValue()));"
-      <> cline "  DbResults dbResults = ctx.query(select);"
-      <> cline "  while (dbResults.next()) {"
-      <> cline "    return Optional.of(fromDbResults(dbResults).getValue());"
-      <> cline "  }"
-      <> cline "  return Optional.empty();"
-      <> cline "}"
-      <> cline ""
-      <> ctemplate "public void update(QueryHelper.Context ctx, DbKey<$1> id, $1 value) {" [className]
-      <> cline "  Dsl.Update update ="
-      <> cline "    Dsl.update(this)"
-      <> cline "    .set(this.dbMapping(id,value))"
-      <> cline "    .where(id().eq(id.getValue()));"
-      <> cline "  ctx.execute(update);"
-      <> cline "}"
-      <> cline ""
-      <> ctemplate "public void delete(QueryHelper.Context ctx, DbKey<$1> id) {" [className]
-      <> cline "  Dsl.Delete delete ="
-      <> cline "    Dsl.delete(this)"
-      <> cline "    .where(id().eq(id.getValue()));"
-      <> cline "  ctx.execute(delete);"
-      <> cline "}"
+      if withIdPrimaryKey
+        then do
+          let fields = [(dbc, col,field) | dbc@(DbColumn col field) <- dbColumns]
+          genFromDbResultsWithIdKey fields
+          genDbMappingWithIdKey fields
 
-    hasPrimaryKey = case getAnnotationField annotation "withIdPrimaryKey" of
-      (Just (JS.Bool True)) -> True
-      _ -> False
+          when (jt_crudfns jtflags) $ do
+            crudHelperFns
 
-    allColumns = primaryKeyColumn <> columns
-    primaryKeyColumn = if hasPrimaryKey then [("id","id","String",id,id)] else []
-    columns = map generateCol (struct_fields struct)
+        else do
+          genFromDbResults dbColumns
+          genDbMapping dbColumns
 
-    dbMappings
-      =  [ template "e($1(), $2)" [unreserveWord fieldName, toDb (template "value.get$1()" [upper1 fieldName])]
-         | (colName,fieldName,fieldType,fromDb,toDb) <- columns ]
+    genFromDbResults dbColumns = do
+      setters <- for dbColumns $ \dbc -> case dbc of
+        (DbColumn col field) -> do
+          expr <- adlFromDbExpr col field (template "res.get($1())" [AST.f_name field])
+          return (ctemplate "result.set$1($2);" [J.javaCapsFieldName field,expr])
+        (IdColumn col) -> return (cline "result.setId(res.get(id())")
 
-    generateCol :: Field -> (T.Text,T.Text,T.Text,T.Text->T.Text,T.Text->T.Text)
-    generateCol field = (colName,fieldName,fieldType,fromDb,toDb)
-      where
-        colName = dbColumnName field
-        fieldName = field_name field
-        fieldType = javaFieldType (field_typeExpr field)
-        fromDb expr = fromDbExpr (field_typeExpr field) expr
-        toDb expr = toDbExpr (field_typeExpr field) expr
+      J.addMethod
+        ( cblock (template "public $1 fromDbResults(DbResults res)" [javaClassNameT])
+          (  ctemplate "$1 result = new $1();" [javaClassNameT]
+          <> mconcat setters
+          <> cline "return result;"
+          )
+        )
 
-    tableClassName = javaTableClassName decl
-    className = javaClassName decl
-    tableName = dbTableName decl
-    staticVarName = T.toUpper (dbName (decl_name decl))
+    genDbMapping dbColumns = do
+      getters <- for dbColumns $ \dbc -> case dbc of
+        (DbColumn col field) -> do
+          dbFromAdlExpr col field (template "value.get$1()" [J.javaCapsFieldName field])
+        (IdColumn col) -> return ("value.getId()")
 
-    javaFieldType :: TypeExpr -> T.Text
-    javaFieldType te = javaType (snd (dbType mod te))
+      J.addMethod
+        ( cblock (template "public Map<? extends FieldRef, ? extends Object> dbMapping($1 value)" [javaClassNameT])
+          (  cline "return Mapx.m("
+          <> indent (mconcat [ctemplate "Mapx.e($1(), $2)$3" [javaFieldName dbc, getter, mcomma] | ((dbc,getter),mcomma) <- withCommas (zip dbColumns getters)])
+          <> cline ");"
+          )
+        )
 
-    javaType (Primitive _ _ jt) = jt
-    javaType (Ref _) = "String"
-    javaType Enumeration = "String"
-    javaType Timestamp = "java.time.Instant"
-    javaType Date = "java.time.LocalDate"
-    javaType (DbNewtype _ dbt) = javaType dbt
-    javaType (Json _) = "JsonElement"
+    genFromDbResultsWithIdKey fields = do
+      withDbIdI <- J.addImport "au.com.helixta.adl.common.db.WithDbId"
+      dbKeyI <- J.addImport "au.com.helixta.adl.common.db.DbKey"
 
-    fromDbExpr :: TypeExpr -> T.Text -> T.Text
-    fromDbExpr te expr = case dbType mod te of
-      (Required,dbt) -> fromDbExpr' dbt expr
-      (Nullable,Json te) -> template "Optional.ofNullable($1).map($2::fromJson)" [expr,jsonBindingExpr getJavaPackage te]
-      (Nullable,Ref te') -> template "Optional.ofNullable($1).map(v -> new DbKey<$2>(v))" [expr, localClassName te']
-      (Nullable,dbt) -> template "Optional.ofNullable($1)" [fromDbExpr' dbt expr]
-      where
-        fromDbExpr' :: DbType0 -> T.Text -> T.Text
-        fromDbExpr' (Primitive _ _ _) expr = expr
-        fromDbExpr' Timestamp expr = expr
-        fromDbExpr' Date expr = expr
-        fromDbExpr' (DbNewtype (ScopedName _ name) dbt) expr = template "new $1($2)" [name,expr]
-        fromDbExpr' (Ref te') expr = template "new DbKey<$1>($2)" [localClassName te',expr]
-        fromDbExpr' Enumeration expr = template "$1.fromString($2)" [localClassName te, expr]
-        fromDbExpr' (Json te) expr = template "$1.fromJson($2)" [jsonBindingExpr getJavaPackage te, expr]
+      setters <- for fields $ \(dbc,col,field) -> do
+        expr <- adlFromDbExpr col field (template "res.get($1())" [AST.f_name field])
+        return (ctemplate "result.set$1($2);" [J.javaCapsFieldName field,expr])
 
-    toDbExpr :: TypeExpr -> T.Text -> T.Text
-    toDbExpr te expr = case dbType mod te of
-      (Required,dbt) -> toDbExpr' dbt expr
-      (Nullable,Json te) -> template "($1.isPresent() ? $2.toJson($1.get()) : null)" [expr,jsonBindingExpr getJavaPackage te]
-      (Nullable,Ref _) -> template "$1.map(v -> v.getValue()).orElse(null)" [expr]
-      (Nullable,dbt) -> template "$1.orElse(null)" [toDbExpr' dbt expr]
-      where
-        toDbExpr' :: DbType0 -> T.Text -> T.Text
-        toDbExpr' (Primitive _ _ _) expr = expr
-        toDbExpr' Timestamp expr = expr
-        toDbExpr' Date expr = expr
-        toDbExpr' (DbNewtype (ScopedName _ name) dbt) expr = template "$1.getValue()" [expr]
-        toDbExpr' (Ref _) expr = template "$1.getValue()" [expr]
-        toDbExpr' Enumeration expr = template "$1.toString()" [expr]
-        toDbExpr' (Json te) expr = template "$1.toJson($2)" [jsonBindingExpr getJavaPackage te, expr]
+      J.addMethod
+        ( cblock (template "public $1<$2> fromDbResults(DbResults res)" [withDbIdI,javaClassNameT])
+          (  ctemplate "$1 result = new $1();" [javaClassNameT]
+          <> mconcat setters
+          <> ctemplate "return new $1<$3>(new $2<$3>(res.get(id())), result);" [withDbIdI,dbKeyI,javaClassNameT]
+          )
+        )
 
-dbTableType = ScopedName "common.db" "DbTable"
-dbColumnNameType = ScopedName "common.db" "DbColumnName"
-dbKeyType = ScopedName "common.db" "DbKey"
-instantType = ScopedName "common" "Instant"
-localDateType = ScopedName "common" "LocalDate"
-maybeType = ScopedName "sys.types" "Maybe"
+    genDbMappingWithIdKey fields = do
+      dbKeyI <- J.addImport "au.com.helixta.adl.common.db.DbKey"
+      getters <- for fields $ \(dbc,col,field) -> do
+          dbFromAdlExpr col field (template "value.get$1()" [J.javaCapsFieldName field])
 
-----------------------------------------------------------------------
--- helper stuff
+      J.addMethod
+        ( cblock (template "public Map<? extends FieldRef, ? extends Object> dbMapping($1<$2> id, $2 value)" [dbKeyI,javaClassNameT])
+          (  cline "return Mapx.m("
+          <> indent (cline "Mapx.e(id(), id.getValue()),")
+          <> indent (mconcat [ctemplate "Mapx.e($1(), $2)$3" [javaFieldName dbc, getter, mcomma] | (((dbc,_,_),getter),mcomma) <- withCommas (zip fields getters)])
+          <> cline ");"
+          )
+        )
+
+    crudHelperFns = do
+      dbKeyI <- J.addImport "au.com.helixta.adl.common.db.DbKey"
+
+      J.addMethod
+        ( cblock (template "public $1<$2> create(Supplier<String> idSupplier, QueryHelper.Context ctx, $2 value)" [dbKeyI, javaClassNameT])
+          (  ctemplate "  $1<$2> id = new $1<>(idSupplier.get());" [dbKeyI, javaClassNameT]
+          <> cline "  Dsl.Insert insert = Dsl.insert(this).mappings(dbMapping(id, value));"
+          <> cline "  ctx.execute(insert);"
+          <> cline "  return id;"
+          )
+        )
+
+      J.addMethod
+        ( cblock (template " public Optional<$2> read(QueryHelper.Context ctx, $1<$2> id)" [dbKeyI,javaClassNameT])
+          (  cline "  Dsl.Select select ="
+          <> cline "          Dsl.select(allFields().values())"
+          <> cline "                  .from(this)"
+          <> cline "                  .where(id().eq(id.getValue()));"
+          <> cline "  DbResults dbResults = ctx.query(select);"
+          <> cline "  while (dbResults.next()) {"
+          <> cline "    return Optional.of(fromDbResults(dbResults).getValue());"
+          <> cline "  }"
+          <> cline "  return Optional.empty();"
+          )
+        )
+
+      J.addMethod
+        ( cblock (template "public void update(QueryHelper.Context ctx, $1<$2> id, $2 value)" [dbKeyI,javaClassNameT])
+          (  cline "  Dsl.Update update ="
+          <> cline "    Dsl.update(this)"
+          <> cline "    .set(this.dbMapping(id,value))"
+          <> cline "    .where(id().eq(id.getValue()));"
+          <> cline "  ctx.execute(update);"
+          )
+        )
+
+      J.addMethod
+        ( cblock (template "public void delete(QueryHelper.Context ctx, $1<$2> id)" [dbKeyI,javaClassNameT])
+          (  cline "  Dsl.Delete delete ="
+          <> cline "    Dsl.delete(this)"
+          <> cline "    .where(id().eq(id.getValue()));"
+          <> cline "  ctx.execute(delete);"
+          )
+        )
+
+data DbColumn
+  = IdColumn SC.Column
+  | DbColumn SC.Column (AST.Field J.CResolvedType)
+
+mkDbColumns :: Bool -> [SC.Column] -> [AST.Field J.CResolvedType] -> [DbColumn]
+mkDbColumns False columns fields = zipWith DbColumn columns fields
+mkDbColumns True columns fields = (IdColumn (head columns)): mkDbColumns False(tail columns) fields
+
+javaFieldName :: DbColumn -> T.Text
+javaFieldName (IdColumn _) = "id"
+javaFieldName (DbColumn _ field) = J.unreserveWord (AST.f_name field)
+
+javaDbType :: SC.Column -> AST.Field J.CResolvedType -> T.Text
+javaDbType col field
+  | refEnumeration (AST.f_type field) = "String"
+  | SC.column_ctype col == "text" = "String"
+  | SC.column_ctype col == "boolean" = "Boolean"
+  | SC.column_ctype col == "json" = "JsonElement"
+  | SC.column_ctype col == "bigint" = "Long"
+  | SC.column_ctype col == "integer" = "Integer"
+  | SC.column_ctype col == "timestamp" = "java.time.Instant"
+  | SC.column_ctype col == "date" = "java.time.LocalDate"
+  | otherwise = "unimp:" <> SC.column_ctype col
+
+
+-- Generate an expression converting a db value into an ADL value
+adlFromDbExpr :: SC.Column -> AST.Field J.CResolvedType -> T.Text -> J.CState T.Text
+adlFromDbExpr col field expr = do
+  let ftype = AST.f_type field
+  cgp <- fmap J.cf_codeProfile get
+  fdetails <- J.genFieldDetails field
+  case (SC.column_nullable col,SC.column_references col, SC.column_ctype col,ftype) of
+    (True, _, "json", AST.TypeExpr _ [te]) -> do
+      jbindingExpr <- J.genJsonBindingExpr cgp te
+      return (template "Optional.ofNullable($1).map($2::fromJson)" [expr,jbindingExpr])
+    (True, _, _, AST.TypeExpr _ [te]) -> do
+      expr1 <- adlFromDbExpr col{SC.column_nullable=False} field{AST.f_type=te} "v"
+      let mapExpr = case expr1 of
+            "v" -> ""
+            _ -> template ".map(v -> $1)" [expr1]
+      return (template "Optional.ofNullable($1)$2" [expr,mapExpr])
+    (False,Just _,_,_) -> do
+      return (template "new $1($2)" [J.fd_typeExprStr fdetails,expr])
+    (False,_,"timestamp",_) -> return expr
+    (False,_,"date",_) -> return expr
+    (False,_,"json",_) -> do
+      jbindingExpr <- J.genJsonBindingExpr cgp ftype
+      return (template "$1.fromJson($2)" [jbindingExpr,expr])
+    (False,_,_,_)
+            | refEnumeration ftype -> return (template "$1.fromString($2)" [J.fd_typeExprStr fdetails,expr])
+            | otherwise -> case refNewtype ftype of
+                  (Just n) -> return (template "new $1($2)" [J.fd_typeExprStr fdetails,expr])
+                  Nothing -> return expr
+
+-- Generate an expression converting an ADL value into a db value
+dbFromAdlExpr :: SC.Column -> AST.Field J.CResolvedType -> T.Text -> J.CState T.Text
+dbFromAdlExpr col field expr = do
+  let ftype = AST.f_type field
+  cgp <- fmap J.cf_codeProfile get
+  fdetails <- J.genFieldDetails field
+  case (SC.column_nullable col,SC.column_references col, SC.column_ctype col,ftype) of
+    (True, _, "json", AST.TypeExpr _ [te]) -> do
+      jbindingExpr <- J.genJsonBindingExpr cgp te
+      return (template "($1.isPresent() ? $2.toJson($1.get()) : null)" [expr, jbindingExpr])
+    (True, _, _, AST.TypeExpr _ [te]) -> do
+      expr1 <- dbFromAdlExpr col{SC.column_nullable=False} field{AST.f_type=te} "v"
+      let mapExpr = case expr1 of
+            "v" -> ""
+            _ -> template ".map(v -> $1)" [expr1]
+      return (template "$1$2.orElse(null)" [expr,mapExpr])
+    (False,Just _,_,_) -> do
+      return (template "$1.getValue()" [expr])
+    (False,_,"timestamp",_) -> return expr
+    (False,_,"date",_) -> return expr
+    (False,_,"json",_) -> do
+      jbindingExpr <- J.genJsonBindingExpr cgp ftype
+      return (template "$1.toJson($2)" [jbindingExpr,expr])
+    (False,_,_,_)
+            | refEnumeration ftype -> return (template "$1.toString()" [expr])
+            | otherwise -> case refNewtype ftype of
+                  (Just n) -> return (template "$1.getValue()" [expr])
+                  Nothing -> return expr
+
+dbTableType = AST.ScopedName (AST.ModuleName ["common","db"]) "DbTable"
+
+-- ----------------------------------------------------------------------
+-- -- helper stuff
+
+tableClassName decl = J.unreserveWord (AST.d_name decl) <> "Table"
 
 -- match structs that are annotated to be
 -- database tables
-matchDBTable :: Decl -> Maybe DBTable
-matchDBTable decl = case decl_type_ decl of
-  (DeclType_struct_ struct) ->
-    case getAnnotation (decl_annotations decl) dbTableType of
+matchDBTable :: SC.Schema -> J.CDecl -> Maybe DBTable
+matchDBTable schema decl = case AST.d_type decl of
+  (AST.Decl_Struct struct) ->
+    case getAnnotation (AST.d_annotations decl) dbTableType of
       Nothing -> Nothing
-      (Just annotation) -> Just (decl,struct,annotation)
+      (Just annotation) -> case find (\t -> SC.table_name t == dbTableName decl) (SC.schema_tables schema) of
+        Nothing -> error ("Can't find schema table for oth" <> T.unpack (dbTableName decl))
+        Just table -> Just (decl,struct,table,annotation)
   _ -> Nothing
 
-dbTableName :: Decl -> T.Text
-dbTableName decl = case getAnnotation (decl_annotations decl) dbTableType of
+dbTableName :: J.CDecl -> T.Text
+dbTableName decl = case getAnnotation (AST.d_annotations decl) dbTableType of
   (Just (JS.Object hm)) -> case HM.lookup "tableName" hm of
     (Just (JS.String t)) -> t
-    _ -> dbName (decl_name decl)
-  _ -> dbName (decl_name decl)
+    _ -> dbName (AST.d_name decl)
+  _ -> dbName (AST.d_name decl)
 
-dbColumnName :: Field -> T.Text
-dbColumnName field = case getAnnotation (field_annotations field) dbColumnNameType of
-  (Just (JS.String t)) -> t
-  _ -> dbName (field_name field)
+javaTableClassName :: J.CDecl -> T.Text
+javaTableClassName decl = AST.d_name decl <> "Table"
 
-javaTableClassName :: Decl -> T.Text
-javaTableClassName decl = decl_name decl <> "Table"
-
-javaClassName :: Decl -> T.Text
-javaClassName decl = decl_name decl
-
-upper1 :: T.Text -> T.Text
-upper1 t = case T.uncons t of
-  Nothing -> t
-  Just (c,t') -> T.cons (toUpper c) t'
-
-
-localClassName :: TypeExpr -> T.Text
-localClassName (TypeExpr (TypeRef_reference (ScopedName mname name)) []) | T.null mname = name
-localClassName _ = "UNIMPLEMENTED(X)"
-
-jsonBindingExpr :: JavaPackageFn -> TypeExpr -> T.Text
-jsonBindingExpr getJavaPackage (TypeExpr rt tes) =
-  case rt of
-    (TypeRef_reference (ScopedName mname name))
-      | T.null mname -> template "$1.jsonBinding($2)" [name,bparams]
-      | otherwise    -> template "$1.$2.jsonBinding($3)" [getJavaPackage mname, name, bparams]
-    (TypeRef_primitive p) | p == "Vector"
-      -> template "JsonBindings.arrayList($1)" [bparams]
-    _ -> template "UNIMPLEMENTED($1)" [T.pack (show rt)]
-  where
-    bparams = T.intercalate ", " (map (jsonBindingExpr getJavaPackage) tes)
-
--- Column type mapping:
---    Anything that is a Maybe<T> or Nullable<T> maps to a nullable column
---    Newtypes are expanded
---    Enunerations (ie unions with only void branches) are stored as text
---    DBRef<T> is a foreign key reference
---    Primitives are handled explicitly below
---    everything else is stored as json
-
-data Nullable = Nullable | Required
-type DbType = (Nullable, DbType0)
-
-data DbType0
-  = Primitive Ident T.Text T.Text
-  | Ref TypeExpr
-  | Enumeration
-  | Timestamp
-  | Date
-  | DbNewtype ScopedName DbType0
-  | Json TypeExpr
-
-dbType :: Module -> TypeExpr -> DbType
-dbType mod (TypeExpr ref [te]) | ref == TypeRef_reference maybeType = (Nullable, dbType0 mod te)
-                               | ref == TypeRef_primitive "Nullable" = (Nullable, dbType0 mod te)
-dbType mod te = (Required, dbType0 mod te)
-
-dbType0 :: Module -> TypeExpr -> DbType0
-dbType0 mod te = case resolveNewType mod te of
-  Just (sn,te') -> DbNewtype sn (dbType0 mod te')
-  Nothing -> dbType1 mod te
-
-dbType1 :: Module -> TypeExpr -> DbType0
-
-dbType1 mod (TypeExpr (TypeRef_reference sn) [te])
-  | sn ==  dbKeyType = Ref te
-
-dbType1 mod te@(TypeExpr ref@(TypeRef_reference sn) [])
-  | sn == instantType = Timestamp
-  | sn == localDateType = Date
-  | isEnumeration mod ref = Enumeration
-  | otherwise = Json te
-
-dbType1 mod te@(TypeExpr (TypeRef_primitive p) _)
- | p == "String" = Primitive p "text"      "String"
- | p == "Int8"   = Primitive p "smalllint" "Integer"
- | p == "Int16"  = Primitive p "smalllint" "Integer"
- | p == "Int32"  = Primitive p "integer"   "Integer"
- | p == "Int64"  = Primitive p "bigint"    "Long"
- | p == "Word8"  = Primitive p "smalllint" "Integer"
- | p == "Word16" = Primitive p "smalllint" "Integer"
- | p == "Word32" = Primitive p "integer"   "Integer"
- | p == "Word64" = Primitive p "bigint"    "Long"
- | p == "Float"  = Primitive p "real"      "Float"
- | p == "Double" = Primitive p "double"    "Double"
- | p == "Bool"   = Primitive p "boolean"   "Boolean"
- | p == "Json"   = Primitive p "json"      "JsonElement"
- | otherwise = Json te
-
-dbType1 mod te = Json te
-
--- | A type is an enumeration if it's a union with all void fields.
-isEnumeration :: Module -> TypeRef -> Bool
-isEnumeration mod (TypeRef_reference (ScopedName mname name)) | T.null mname
-  = case M.lookup name (module_decls mod) of
-     Just Decl{decl_type_=DeclType_union_ Union{union_fields=fields}} -> all (isVoidType . field_typeExpr) fields
-     _ -> False
-isEnumeration _ _ = False
-
-resolveNewType :: Module -> TypeExpr -> Maybe (ScopedName,TypeExpr)
-resolveNewType mod (TypeExpr (TypeRef_reference sn@(ScopedName mname name)) []) | T.null mname
-  = case M.lookup name (module_decls mod) of
-     Just Decl{decl_type_=DeclType_newtype_ (NewType [] te _)} -> Just (sn,te)
-     _ -> Nothing
-resolveNewType _ _ = Nothing
-
-isVoidType :: TypeExpr -> Bool
-isVoidType (TypeExpr (TypeRef_primitive p) []) = p == "Void"
-isVoidType _ = False
+javaClassName :: J.CDecl -> T.Text
+javaClassName decl = AST.d_name decl
 
 getAnnotationField :: JS.Value -> T.Text -> Maybe JS.Value
 getAnnotationField (JS.Object hm) field = HM.lookup field hm
@@ -454,94 +421,8 @@ withCommas [] = []
 withCommas [l] = [(l," ")]
 withCommas (l:ls) = (l,","):withCommas ls
 
-typeExprText :: TypeExpr -> T.Text
-typeExprText (TypeExpr tr [])  = typeRefText tr
-typeExprText (TypeExpr tr tes)  = typeRefText tr <> "<" <>  T.intercalate "," (map typeExprText tes) <> ">"
-
-typeRefText :: TypeRef -> T.Text
-typeRefText (TypeRef_primitive p) = p
-typeRefText (TypeRef_typeParam p) = p
-typeRefText (TypeRef_reference (ScopedName mname name))
-   | mname == "" = name
-   | otherwise   = mname <> "." <> name
-
 dbName :: T.Text -> T.Text
 dbName = snakify
 
-getAnnotation :: Annotations -> ScopedName -> Maybe JS.Value
-getAnnotation annotations annotationName = M.lookup annotationName annotations
-
-type JavaPackageFn = T.Text -> T.Text
-
-findJavaPackage :: T.Text -> T.Text -> [RModule] -> JavaPackageFn
-findJavaPackage rtJavaPackage defJavaPackage mods adlPackage =
-  case T.isPrefixOf "sys." adlPackage of
-    True -> rtJavaPackage <> "." <> adlPackage
-    False -> case find (\mod -> formatText (AST.m_name mod) == adlPackage) mods of
-      Nothing -> defJavaPackage <> "." <> adlPackage
-      (Just mod) -> case M.lookup snJavaPackage (AST.m_annotations mod) of
-        Just (_,JS.String pkg) -> pkg
-        Nothing -> defJavaPackage <> "." <> adlPackage
-  where
-    snJavaPackage = AST.ScopedName (AST.ModuleName ["adlc","config","java"]) "JavaPackage"
-
-reservedWords :: S.Set T.Text
-reservedWords = S.fromList
- [ "abstract"
- , "assert"
- , "boolean"
- , "break"
- , "byte"
- , "case"
- , "catch"
- , "char"
- , "class"
- , "const"
- , "continue"
- , "default"
- , "do"
- , "double"
- , "else"
- , "enum"
- , "extends"
- , "false"
- , "final"
- , "finally"
- , "float"
- , "for"
- , "goto"
- , "if"
- , "implements"
- , "import"
- , "instanceof"
- , "int"
- , "interface"
- , "long"
- , "native"
- , "new"
- , "null"
- , "package"
- , "private"
- , "protected"
- , "public"
- , "return"
- , "short"
- , "static"
- , "strictfp"
- , "super"
- , "switch"
- , "synchronized"
- , "this"
- , "throw"
- , "throws"
- , "transient"
- , "true"
- , "try"
- , "void"
- , "volatile"
- , "while"
- ]
-
-unreserveWord :: T.Text -> T.Text
-unreserveWord n | S.member n reservedWords = T.append n "_"
-                | otherwise = n
+getAnnotation :: AST.Annotations J.CResolvedType -> AST.ScopedName -> Maybe JS.Value
+getAnnotation annotations annotationName = snd <$> M.lookup annotationName annotations
