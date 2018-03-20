@@ -194,17 +194,16 @@ generateJavaModel jtflags cgp javaPackageFn mod (decl,struct,table,dbTableAnnota
           genDbMapping dbColumns
 
     genFromDbResults dbColumns = do
-      setters <- for dbColumns $ \dbc -> case dbc of
+      ctorargs <- for dbColumns $ \dbc -> case dbc of
         (DbColumn col field) -> do
-          expr <- adlFromDbExpr col field (template "res.get($1())" [AST.f_name field])
-          return (ctemplate "result.set$1($2);" [J.javaCapsFieldName field,expr])
-        (IdColumn col) -> return (cline "result.setId(res.get(id())")
+          adlFromDbExpr col field (template "res.get($1())" [AST.f_name field])
+        (IdColumn col) -> return "res.get(id()"
 
       J.addMethod
         ( cblock (template "public $1 fromDbResults(DbResults res)" [javaClassNameT])
-          (  ctemplate "$1 result = new $1();" [javaClassNameT]
-          <> mconcat setters
-          <> cline "return result;"
+          (  ctemplate "return new $1(" [javaClassNameT]
+          <> indent (mconcat [ cline (ctorarg <> mcomma) | (ctorarg,mcomma) <- withCommas ctorargs] )
+          <> cline ");"
           )
         )
 
@@ -226,14 +225,14 @@ generateJavaModel jtflags cgp javaPackageFn mod (decl,struct,table,dbTableAnnota
       withDbIdI <- J.addImport "au.com.helixta.adl.common.db.WithDbId"
       dbKeyI <- J.addImport "au.com.helixta.adl.common.db.DbKey"
 
-      setters <- for fields $ \(dbc,col,field) -> do
-        expr <- adlFromDbExpr col field (template "res.get($1())" [AST.f_name field])
-        return (ctemplate "result.set$1($2);" [J.javaCapsFieldName field,expr])
+      ctorargs <- for fields $ \(dbc,col,field) -> do
+        adlFromDbExpr col field (template "res.get($1())" [AST.f_name field])
 
       J.addMethod
         ( cblock (template "public $1<$2> fromDbResults(DbResults res)" [withDbIdI,javaClassNameT])
-          (  ctemplate "$1 result = new $1();" [javaClassNameT]
-          <> mconcat setters
+          (  ctemplate "$1 result = new $1(" [javaClassNameT]
+          <> indent (mconcat [ cline (ctorarg <> mcomma) | (ctorarg,mcomma) <- withCommas ctorargs] )
+          <> cline ");"
           <> ctemplate "return new $1<$3>(new $2<$3>(res.get(id())), result);" [withDbIdI,dbKeyI,javaClassNameT]
           )
         )
