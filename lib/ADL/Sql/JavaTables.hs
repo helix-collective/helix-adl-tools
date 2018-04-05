@@ -318,6 +318,7 @@ javaDbType col field
   | SC.column_ctype col == "integer" = "Integer"
   | SC.column_ctype col == "timestamp" = "java.time.Instant"
   | SC.column_ctype col == "date" = "java.time.LocalDate"
+  | SC.column_ctype col == "double precision" = "Double"
   | otherwise = "unimp:" <> SC.column_ctype col
 
 
