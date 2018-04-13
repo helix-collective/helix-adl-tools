@@ -17,7 +17,7 @@ import ADL.Compiler.Processing
 import ADL.Utils.IndentedCode
 import ADL.Utils.Format
 import ADL.Sql.Schema
-import Data.List(intersperse)
+import Data.List(intersperse, sort)
 import Data.Monoid
 import Cases(snakify)
 import Data.Maybe(mapMaybe)
@@ -45,7 +45,7 @@ sqlFromSchema :: Schema -> Code
 sqlFromSchema schema =  sql
   where
     sql
-      =  ctemplate "-- Schema auto-generated from adl modules: $1" [T.intercalate ", " (schema_adlModules schema)]
+      =  ctemplate "-- Schema auto-generated from adl modules: $1" [T.intercalate ", " (sort (schema_adlModules schema))]
       <> cline "--"
       <> cline "-- column comments show original ADL types"
       <> cline ""
