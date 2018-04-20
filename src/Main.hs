@@ -13,6 +13,7 @@ import ADL.Compiler.Processing(loadAndCheckModule,defaultAdlFlags)
 import ADL.Compiler.Utils(writeOutputFile)
 import ADL.Sql.SchemaUtils(schemaFromAdl,columnFromField,sqlFromSchema)
 import ADL.Sql.JavaTables(generateJavaTables)
+import ADL.Http.JavaReqs(generateJavaReqs)
 import Control.Monad.Trans(liftIO)
 import Data.Monoid((<>), mconcat, mempty)
 import Data.Traversable(for)
@@ -26,10 +27,12 @@ main = do
   case args of
    ("sql":args) -> exitOnError $ generateSchema args
    ("java-tables":args) -> exitOnError $ generateJavaTables args
+   ("java-http-reqs":args) -> exitOnError $ generateJavaReqs args
    _ -> do
      T.hPutStrLn stderr "Usage:"
      T.hPutStrLn stderr "    hx-adl sql ...args..."
      T.hPutStrLn stderr "    hx-adl java-tables ...args..."
+     T.hPutStrLn stderr "    hx-adl java-http-reqs ...args..."
      exitWith (ExitFailure 1)
 
 generateSchema :: [String] -> EIO T.Text ()
