@@ -71,7 +71,8 @@ generateJavaReqs args = do
         requestDecls = mapMaybe getRequestDecl (M.elems (AST.m_decls mod))
         classfile = generateJavaReqsClassFile (f_backend flags) cgp javaPackageFn mod requestDecls
         text = (T.intercalate "\n" (codeText 1000 (J.classFileCode classfile)))
-    liftIO $ fileWriter filePath (LBS.fromStrict (T.encodeUtf8 text))
+    when (not (null requestDecls)) $ do
+      liftIO $ fileWriter filePath (LBS.fromStrict (T.encodeUtf8 text))
 
 type RTypeExpr = AST.TypeExpr ResolvedType
 
