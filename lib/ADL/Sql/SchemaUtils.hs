@@ -1,8 +1,13 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings, ScopedTypeVariables #-}
 module ADL.Sql.SchemaUtils
   ( schemaFromAdl
   , sqlFromSchema
   , columnFromField
+  , columnTypeFromField
+  , typeExprReferences
+  , instantType
+  , localDateType
+  , localDateTimeType
   ) where
 
 import qualified Data.Aeson as JS
@@ -133,12 +138,27 @@ mkTable mkColumn (decl,struct,ann) = Table
     fromLitString (JS.String s) = s
     fromLitBool (JS.Bool b) = b
 
-type BoundTypeVariables = M.Map Ident RTypeExpr
+type BoundTypeVariables c = M.Map Ident (TypeExpr (ResolvedTypeT c))
 
-columnFromField :: RField -> Column
-columnFromField field = mkColumn M.empty False (f_type field)
+data RawColumn c = RawColumn {
+  -- The schema column details
+  rc_column:: Column,
+
+  -- The ADL type of the column after resolving type parameters, type aliases, nullability etc
+  rc_adltype :: TypeExpr (ResolvedTypeT c)
+}
+
+columnFromField :: Field (ResolvedTypeT c) -> Column
+columnFromField field = rc_column (rawColumnFromField field)
+
+columnTypeFromField :: Field (ResolvedTypeT c) -> TypeExpr (ResolvedTypeT c)
+columnTypeFromField field = rc_adltype (rawColumnFromField field)
+
+
+rawColumnFromField :: forall c . Field (ResolvedTypeT c) -> RawColumn c
+rawColumnFromField field = mkColumn M.empty False (f_type field)
   where
-    mkColumn :: BoundTypeVariables -> Bool -> RTypeExpr -> Column
+    mkColumn :: BoundTypeVariables c -> Bool -> TypeExpr (ResolvedTypeT c) -> RawColumn c
 
     -- First consider Maybe<> and Nullable<> as they will switch the column
     -- to support nulls
@@ -146,14 +166,14 @@ columnFromField field = mkColumn M.empty False (f_type field)
     mkColumn btv False (TypeExpr (RT_Primitive P_Nullable) [te]) = mkColumn btv True te
 
     -- Now consider the special cases for DbKey<>, Instant, LocalDate, and enumerations
-    mkColumn _ nullable (TypeExpr (RT_Named (sn1,_)) [TypeExpr (RT_Named (sn2,_)) []]) | sn1 ==  dbKeyType =
-      (mkPrimColumn nullable "text"){column_references=Just (ForeignKeyRef (dbName (sn_name sn2)) "id")}
-    mkColumn _ nullable (TypeExpr (RT_Named (sn,_)) [])  | sn == instantType =
-      mkPrimColumn nullable "timestamp"
-    mkColumn _ nullable (TypeExpr (RT_Named (sn,_)) [])  | sn == localDateType =
-      mkPrimColumn nullable "date"
-    mkColumn _ nullable (TypeExpr ref [])  | isEnumeration2 ref =
-      mkPrimColumn nullable "text"
+    mkColumn _ nullable te@(TypeExpr (RT_Named (sn1,_)) [TypeExpr (RT_Named (sn2,_)) []]) | sn1 ==  dbKeyType =
+      mkIdColumn sn2 nullable te
+    mkColumn _ nullable te
+      | typeExprReferences instantType te = mkRawColumn nullable "timestamp" te
+      | typeExprReferences localDateType te = mkRawColumn nullable "date" te
+      | typeExprReferences localDateTimeType te = mkRawColumn nullable "timestamp" te
+    mkColumn _ nullable te@(TypeExpr ref [])  | isEnumeration2 ref =
+      mkRawColumn nullable "text" te
 
     -- typedefs and newtypes are expanded, doing the right thing with type parameters
     mkColumn btv nullable (TypeExpr (RT_Named (_,Decl{d_type=Decl_Typedef t})) tes) =
@@ -170,26 +190,40 @@ columnFromField field = mkColumn M.empty False (f_type field)
 
     -- Primitives
     mkColumn _ nullable te@(TypeExpr (RT_Primitive p) _) =
-      mkPrimColumn nullable (primColumnType p)
+      mkRawColumn nullable (primColumnType p) te
 
     -- For any other types, just store as json
-    mkColumn _ nullable _ =
-      mkPrimColumn nullable "json"
+    mkColumn _ nullable te =
+      mkRawColumn nullable "json" te
 
     columnName = case getAnnotation (f_annotations field) dbColumnNameType of
       Just (JS.String columnName) -> columnName
       Nothing -> dbName (f_name field)
 
-    mkPrimColumn :: Bool -> T.Text -> Column
-    mkPrimColumn nullable ctype = Column
-     { column_name = columnName
-     , column_ctype = ctype
-     , column_comment = typeExprText (f_type field)
-     , column_nullable = nullable
-     , column_references = Nothing
-     }
+    mkIdColumn :: ScopedName -> Bool ->  TypeExpr (ResolvedTypeT c) -> RawColumn c
+    mkIdColumn sn nullable te = RawColumn col te
+      where
+        col = Column
+          { column_name = columnName
+          , column_ctype = "text"
+          , column_comment = typeExprText (f_type field)
+          , column_nullable = nullable
+          , column_references = Just (ForeignKeyRef (dbName (sn_name sn)) "id")
+          }
 
-createBoundTypeVariables :: BoundTypeVariables -> [Ident] -> [RTypeExpr] -> BoundTypeVariables
+    mkRawColumn :: Bool -> T.Text -> TypeExpr (ResolvedTypeT c) -> RawColumn c
+    mkRawColumn nullable ctype te = RawColumn col te
+      where
+        col = Column
+          { column_name = columnName
+          , column_ctype = ctype
+          , column_comment = typeExprText (f_type field)
+          , column_nullable = nullable
+          , column_references = Nothing
+          }
+
+
+createBoundTypeVariables :: BoundTypeVariables c -> [Ident] -> [TypeExpr (ResolvedTypeT c)] -> BoundTypeVariables c
 createBoundTypeVariables btv names types = M.union btv (M.fromList (zip names types))
 
 primColumnType p =  case p of
@@ -217,14 +251,14 @@ matchDBTable decl = case d_type decl of
       (Just annotation) -> Just (decl,struct,annotation)
   _ -> Nothing
 
-getAnnotation :: RAnnotations -> ScopedName -> Maybe JS.Value
+getAnnotation :: Annotations (ResolvedTypeT c)-> ScopedName -> Maybe JS.Value
 getAnnotation annotations annotationName = snd <$> (M.lookup annotationName annotations)
 
-typeExprText :: RTypeExpr -> T.Text
+typeExprText :: TypeExpr (ResolvedTypeT c) -> T.Text
 typeExprText (TypeExpr tr [])  = typeRefText tr
 typeExprText (TypeExpr tr tes)  = typeRefText tr <> "<" <>  T.intercalate "," (map typeExprText tes) <> ">"
 
-typeRefText :: ResolvedType -> T.Text
+typeRefText :: ResolvedTypeT c -> T.Text
 typeRefText (RT_Primitive p) = formatText p
 typeRefText (RT_Param p) = p
 typeRefText (RT_Named (ScopedName (ModuleName mname) name,_))
@@ -232,7 +266,7 @@ typeRefText (RT_Named (ScopedName (ModuleName mname) name,_))
    | otherwise   = T.intercalate "." mname <> "." <> name
 -- | A type is an enumeration if it's a union with all void fields.
 
-isEnumeration2 :: ResolvedType -> Bool
+isEnumeration2 :: ResolvedTypeT c -> Bool
 isEnumeration2 (RT_Named (ScopedName mname name,Decl{d_type=Decl_Union u})) = isEnumeration u
 isEnumeration2 _ = False
 
@@ -249,10 +283,15 @@ withCommas [] = []
 withCommas [l] = [(l," ")]
 withCommas (l:ls) = (l,","):withCommas ls
 
+typeExprReferences :: ScopedName -> TypeExpr (ResolvedTypeT c) -> Bool
+typeExprReferences scopedName (TypeExpr (RT_Named (sn,_)) _) | sn == scopedName = True
+typeExprReferences _ _ = False
+
 dbTableType = ScopedName (ModuleName ["common","db"]) "DbTable"
 dbColumnNameType = ScopedName (ModuleName ["common","db"]) "DbColumnName"
 dbKeyType = ScopedName (ModuleName ["common","db"]) "DbKey"
 pkType = ScopedName (ModuleName ["common","db"]) "PK"
 instantType = ScopedName (ModuleName ["common"]) "Instant"
 localDateType = ScopedName (ModuleName ["common"]) "LocalDate"
+localDateTimeType = ScopedName (ModuleName ["common"]) "LocalDateTime"
 maybeType = ScopedName (ModuleName ["sys","types"]) "Maybe"

@@ -22,7 +22,6 @@ import qualified ADL.Compiler.Backends.Java as J
 import qualified ADL.Sql.SchemaUtils as SC
 import qualified ADL.Sql.Schema as SC
 
-
 import ADL.Compiler.EIO
 import ADL.Compiler.Primitive
 import ADL.Compiler.Processing(AdlFlags(..),ResolvedType, RModule,RDecl,defaultAdlFlags,loadAndCheckModule1,removeModuleTypedefs, expandModuleTypedefs, associateCustomTypes, refEnumeration, refNewtype, ResolvedTypeT(..))
@@ -316,11 +315,13 @@ javaDbType col field
   | SC.column_ctype col == "json" = "JsonElement"
   | SC.column_ctype col == "bigint" = "Long"
   | SC.column_ctype col == "integer" = "Integer"
-  | SC.column_ctype col == "timestamp" = "java.time.Instant"
-  | SC.column_ctype col == "date" = "java.time.LocalDate"
+  | SC.typeExprReferences SC.instantType te  = "java.time.Instant"
+  | SC.typeExprReferences SC.localDateTimeType te = "java.time.LocalDateTime"
+  | SC.typeExprReferences SC.localDateType te = "java.time.LocalDate"
   | SC.column_ctype col == "double precision" = "Double"
   | otherwise = "unimp:" <> SC.column_ctype col
-
+  where
+    te = SC.columnTypeFromField field
 
 -- Generate an expression converting a db value into an ADL value
 adlFromDbExpr :: SC.Column -> AST.Field J.CResolvedType -> T.Text -> J.CState T.Text
