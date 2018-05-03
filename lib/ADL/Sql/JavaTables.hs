@@ -334,7 +334,7 @@ adlFromDbExpr col field expr = do
       jbindingExpr <- J.genJsonBindingExpr cgp te
       return (template "Optional.ofNullable($1).map($2::fromJson)" [expr,jbindingExpr])
     (True, _, _, AST.TypeExpr _ [te]) -> do
-      expr1 <- adlFromDbExpr col{SC.column_nullable=False} field{AST.f_type=te} "v"
+      expr1 <- adlFromDbExpr col{SC.column_nullable=False} field{AST.f_type=te,AST.f_default=Nothing} "v"
       let mapExpr = case expr1 of
             "v" -> ""
             _ -> template ".map(v -> $1)" [expr1]
@@ -363,7 +363,7 @@ dbFromAdlExpr col field expr = do
       jbindingExpr <- J.genJsonBindingExpr cgp te
       return (template "($1.isPresent() ? $2.toJson($1.get()) : null)" [expr, jbindingExpr])
     (True, _, _, AST.TypeExpr _ [te]) -> do
-      expr1 <- dbFromAdlExpr col{SC.column_nullable=False} field{AST.f_type=te} "v"
+      expr1 <- dbFromAdlExpr col{SC.column_nullable=False} field{AST.f_type=te,AST.f_default=Nothing} "v"
       let mapExpr = case expr1 of
             "v" -> ""
             _ -> template ".map(v -> $1)" [expr1]
