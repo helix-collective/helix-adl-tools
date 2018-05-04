@@ -77,7 +77,6 @@ generateJavaReqs args = do
 type RTypeExpr = AST.TypeExpr ResolvedType
 
 data GetReq = GetReq {
-  gr_req :: J.CTypeExpr,
   gr_resp :: J.CTypeExpr
 }
 
@@ -98,8 +97,9 @@ data RequestDecl = RequestDecl {
 --   type Hello = Post<HelloReq, HelloResp>;
 getRequestDecl :: J.CDecl -> Maybe RequestDecl
 getRequestDecl decl = case AST.d_type decl of
+  (AST.Decl_Typedef (AST.Typedef [] (AST.TypeExpr (RT_Named (sn,_)) [resp])))
+    | sn == getReqScopedName -> Just (RequestDecl decl (RT_Get (GetReq  (ex resp))))
   (AST.Decl_Typedef (AST.Typedef [] (AST.TypeExpr (RT_Named (sn,_)) [req,resp])))
-    | sn == getReqScopedName -> Just (RequestDecl decl (RT_Get (GetReq  (ex req) (ex resp))))
     | sn == postReqScopedName -> Just (RequestDecl decl (RT_Post (PostReq  (ex req) (ex resp))))
   _ -> Nothing
   where
@@ -118,16 +118,13 @@ generateJavaReqsClassFile flags cgp javaPackageFn mod requests = execState gen s
             docstring = J.generateDocString (AST.d_annotations (rd_decl req))
         case rd_type req of
           (RT_Get gr) -> do
-            reqtype <- J.genTypeExpr (gr_req gr)
             resptype <- J.genTypeExpr (gr_resp gr)
-            reqjb <- J.genJsonBindingExpr cgp (gr_req gr)
             respjb <- J.genJsonBindingExpr cgp (gr_resp gr)
             J.addMethod
               (  docstring
-              <> ctemplate "public static final $1.AdlGetRequest<$2,$3> $4 = new $1.AdlGetRequest<>(" [httpRequestsI, reqtype, resptype, name]
+              <> ctemplate "public static final $1.AdlGetRequest<$2> $3 = new $1.AdlGetRequest<>(" [httpRequestsI, resptype, name]
               <> indent
-                (  ctemplate "$1," [reqjb]
-                <> ctemplate "$1" [respjb]
+                (  ctemplate "$1" [respjb]
                 )
               <> cline ");"
               )
