@@ -108,8 +108,8 @@ mkTable mkColumn (decl,struct,ann) = Table
   }
   where
     tableName = case getLiteralField ann "tableName" of
-      Nothing -> dbName (d_name decl)
-      (Just lit) -> fromLitString lit
+      (Just lit) | lit /= "" -> fromLitString lit
+      _ -> dbName (d_name decl)
 
     uconstraints :: [[T.Text]]
     uconstraints = case getLiteralField ann "uniquenessConstraints" of
