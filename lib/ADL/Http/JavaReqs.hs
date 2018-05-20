@@ -85,7 +85,9 @@ data PostReq = PostReq {
   pr_resp :: J.CTypeExpr
 }
 
-data RequestType = RT_Get GetReq | RT_Post PostReq
+type PutReq = PostReq
+
+data RequestType = RT_Get GetReq | RT_Post PostReq | RT_Put PutReq
 
 data RequestDecl = RequestDecl {
   rd_decl :: J.CDecl,
@@ -101,6 +103,8 @@ getRequestDecl decl = case AST.d_type decl of
     | sn == getReqScopedName -> Just (RequestDecl decl (RT_Get (GetReq  (ex resp))))
   (AST.Decl_Typedef (AST.Typedef [] (AST.TypeExpr (RT_Named (sn,_)) [req,resp])))
     | sn == postReqScopedName -> Just (RequestDecl decl (RT_Post (PostReq  (ex req) (ex resp))))
+  (AST.Decl_Typedef (AST.Typedef [] (AST.TypeExpr (RT_Named (sn,_)) [req,resp])))
+    | sn == putReqScopedName -> Just (RequestDecl decl (RT_Put (PostReq  (ex req) (ex resp))))
   _ -> Nothing
   where
     ex = expandTypedefs
@@ -142,6 +146,20 @@ generateJavaReqsClassFile flags cgp javaPackageFn mod requests = execState gen s
                 )
               <> cline ");"
               )
+          (RT_Put pr) -> do
+            reqtype <- J.genTypeExpr (pr_req pr)
+            resptype <- J.genTypeExpr (pr_resp pr)
+            reqjb <- J.genJsonBindingExpr cgp (pr_req pr)
+            respjb <- J.genJsonBindingExpr cgp (pr_resp pr)
+            J.addMethod
+              (  docstring
+              <> ctemplate "public static final $1.AdlPutRequest<$2,$3> $4 = new $1.AdlPutRequest<>(" [httpRequestsI, reqtype, resptype, name]
+              <> indent
+                (  ctemplate "$1," [reqjb]
+                <> ctemplate "$1" [respjb]
+                )
+              <> cline ");"
+              )
       return ()
 
 requestName :: T.Text -> T.Text
@@ -149,3 +167,4 @@ requestName = T.toUpper . snakify
 
 getReqScopedName = AST.ScopedName (AST.ModuleName ["common","http"]) "Get"
 postReqScopedName = AST.ScopedName (AST.ModuleName ["common","http"]) "Post"
+putReqScopedName = AST.ScopedName (AST.ModuleName ["common","http"]) "Put"
