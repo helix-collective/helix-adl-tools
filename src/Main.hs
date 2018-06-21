@@ -47,7 +47,7 @@ generateSchema args = do
   -- Compute the SQL for the aggregate schema
   let schema = mconcat schemas
       sql = sqlFromSchema schema
-      t = T.intercalate "\n" (codeText 1000 sql)
+      t = T.intercalate "\n" (codeText Nothing sql)
 
   -- Write it out
   liftIO $ writeOutputFile (f_output flags) "create.sql" (LBS.fromStrict (T.encodeUtf8 t))

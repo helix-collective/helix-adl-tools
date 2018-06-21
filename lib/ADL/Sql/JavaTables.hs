@@ -93,7 +93,7 @@ writeModuleJavaTables writeFile jtflags cgp javaPackageFn schema rmod = do
   for_ tableDecls $ \(decl,struct,table,annotation) -> do
     let filePath = J.javaClassFilePath (J.javaClass (javaPackageFn (AST.m_name rmod)) (tableClassName decl))
         classfile = generateJavaModel jtflags cgp javaPackageFn rmod (decl,struct,table,annotation)
-        text = (T.intercalate "\n" (codeText 1000 (J.classFileCode classfile)))
+        text = (T.intercalate "\n" (codeText Nothing (J.classFileCode classfile)))
     writeFile filePath (LBS.fromStrict (T.encodeUtf8 text))
 
 lookupTable :: T.Text -> SC.Schema -> SC.Table

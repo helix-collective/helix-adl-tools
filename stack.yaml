@@ -1,10 +1,10 @@
 flags: {}
-resolver: lts-11.4
+resolver: lts-10.10
 packages:
 - location: .
 - location:
     git: git@github.com:timbod7/adl.git
-    commit: 1980287757e1097f74ae57d170298c9fa7f3ccde
+    commit: 263bbd00e48c06d6ca957d2c9e872c12e4cde55d
   subdirs:
   - haskell/utils
   - haskell/runtime

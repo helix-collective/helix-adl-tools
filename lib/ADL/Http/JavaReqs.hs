@@ -70,7 +70,7 @@ generateJavaReqs args = do
               ) mod0
         requestDecls = mapMaybe getRequestDecl (M.elems (AST.m_decls mod))
         classfile = generateJavaReqsClassFile (f_backend flags) cgp javaPackageFn mod requestDecls
-        text = (T.intercalate "\n" (codeText 1000 (J.classFileCode classfile)))
+        text = (T.intercalate "\n" (codeText Nothing (J.classFileCode classfile)))
     when (not (null requestDecls)) $ do
       liftIO $ fileWriter filePath (LBS.fromStrict (T.encodeUtf8 text))
 
