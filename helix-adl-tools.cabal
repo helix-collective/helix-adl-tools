@@ -43,6 +43,8 @@ library
                      , ADL.Sql.SchemaUtils
                      , ADL.Sql.JavaTables
                      , ADL.Http.JavaReqs
+                     , ADL.Http.TypescriptReqs
+                     , ADL.Http.Utils
   default-language:    Haskell2010
   build-depends:       base >= 4.7 && < 5
                      , aeson >= 1.0.2.1 && < 1.3

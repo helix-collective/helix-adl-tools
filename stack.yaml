@@ -4,7 +4,7 @@ packages:
 - location: .
 - location:
     git: git@github.com:timbod7/adl.git
-    commit: 263bbd00e48c06d6ca957d2c9e872c12e4cde55d
+    commit: 8de6261e16e505385d2f9931a1007feb7991b760
   subdirs:
   - haskell/utils
   - haskell/runtime

@@ -22,6 +22,7 @@ import ADL.Compiler.Utils(FileWriter,writeOutputFile)
 import ADL.Compiler.Flags(Flags(..),parseArguments,standardOptions, addToMergeFileExtensions)
 import ADL.Utils.IndentedCode
 import ADL.Utils.Format(template,formatText)
+import ADL.Http.Utils(GetReq(..), PostReq(..), PutReq, RequestType(..), RequestDecl(..), getRequestDecl)
 import Cases(snakify)
 import Control.Monad(when)
 import Control.Monad.Trans(liftIO)
@@ -74,43 +75,8 @@ generateJavaReqs args = do
     when (not (null requestDecls)) $ do
       liftIO $ fileWriter filePath (LBS.fromStrict (T.encodeUtf8 text))
 
-type RTypeExpr = AST.TypeExpr ResolvedType
-
-data GetReq = GetReq {
-  gr_resp :: J.CTypeExpr
-}
-
-data PostReq = PostReq {
-  pr_req :: J.CTypeExpr,
-  pr_resp :: J.CTypeExpr
-}
-
-type PutReq = PostReq
-
-data RequestType = RT_Get GetReq | RT_Post PostReq | RT_Put PutReq
-
-data RequestDecl = RequestDecl {
-  rd_decl :: J.CDecl,
-  rd_type :: RequestType
-}
-
--- matches a declaration of a post or get request, of the form:
---
---   type Hello = Post<HelloReq, HelloResp>;
-getRequestDecl :: J.CDecl -> Maybe RequestDecl
-getRequestDecl decl = case AST.d_type decl of
-  (AST.Decl_Typedef (AST.Typedef [] (AST.TypeExpr (RT_Named (sn,_)) [resp])))
-    | sn == getReqScopedName -> Just (RequestDecl decl (RT_Get (GetReq  (ex resp))))
-  (AST.Decl_Typedef (AST.Typedef [] (AST.TypeExpr (RT_Named (sn,_)) [req,resp])))
-    | sn == postReqScopedName -> Just (RequestDecl decl (RT_Post (PostReq  (ex req) (ex resp))))
-  (AST.Decl_Typedef (AST.Typedef [] (AST.TypeExpr (RT_Named (sn,_)) [req,resp])))
-    | sn == putReqScopedName -> Just (RequestDecl decl (RT_Put (PostReq  (ex req) (ex resp))))
-  _ -> Nothing
-  where
-    ex = expandTypedefs
-
 -- | Generate the java http request helpers
-generateJavaReqsClassFile :: JavaReqFlags -> J.CodeGenProfile -> J.JavaPackageFn-> J.CModule  -> [RequestDecl] -> J.ClassFile
+generateJavaReqsClassFile :: JavaReqFlags -> J.CodeGenProfile -> J.JavaPackageFn-> J.CModule  -> [RequestDecl (Maybe J.CustomType)] -> J.ClassFile
 generateJavaReqsClassFile flags cgp javaPackageFn mod requests = execState gen state0
   where
     state0 = J.classFile cgp (AST.m_name mod) javaPackageFn classDecl
@@ -164,7 +130,3 @@ generateJavaReqsClassFile flags cgp javaPackageFn mod requests = execState gen s
 
 requestName :: T.Text -> T.Text
 requestName = T.toUpper . snakify
-
-getReqScopedName = AST.ScopedName (AST.ModuleName ["common","http"]) "Get"
-postReqScopedName = AST.ScopedName (AST.ModuleName ["common","http"]) "Post"
-putReqScopedName = AST.ScopedName (AST.ModuleName ["common","http"]) "Put"
