@@ -81,6 +81,7 @@ generateJavaReqsClassFile flags cgp javaPackageFn mod requests = execState gen s
   where
     state0 = J.classFile cgp (AST.m_name mod) javaPackageFn classDecl
     classDecl = "@SuppressWarnings(\"all\")\npublic class Requests"
+    genBoxedTypeExpr te = J.genTypeExprB J.TypeBoxed te
     gen = do
       httpRequestsI <- J.addImport "au.com.helixta.adl.custom.HttpRequests"
       for_ requests $ \req -> do
@@ -88,7 +89,7 @@ generateJavaReqsClassFile flags cgp javaPackageFn mod requests = execState gen s
             docstring = J.generateDocString (AST.d_annotations (rd_decl req))
         case rd_type req of
           (RT_Get gr) -> do
-            resptype <- J.genTypeExpr (gr_resp gr)
+            resptype <- genBoxedTypeExpr (gr_resp gr)
             respjb <- J.genJsonBindingExpr cgp (gr_resp gr)
             J.addMethod
               (  docstring
@@ -99,8 +100,8 @@ generateJavaReqsClassFile flags cgp javaPackageFn mod requests = execState gen s
               <> cline ");"
               )
           (RT_Post pr) -> do
-            reqtype <- J.genTypeExpr (pr_req pr)
-            resptype <- J.genTypeExpr (pr_resp pr)
+            reqtype <- genBoxedTypeExpr (pr_req pr)
+            resptype <- genBoxedTypeExpr (pr_resp pr)
             reqjb <- J.genJsonBindingExpr cgp (pr_req pr)
             respjb <- J.genJsonBindingExpr cgp (pr_resp pr)
             J.addMethod
@@ -113,8 +114,8 @@ generateJavaReqsClassFile flags cgp javaPackageFn mod requests = execState gen s
               <> cline ");"
               )
           (RT_Put pr) -> do
-            reqtype <- J.genTypeExpr (pr_req pr)
-            resptype <- J.genTypeExpr (pr_resp pr)
+            reqtype <- genBoxedTypeExpr (pr_req pr)
+            resptype <- genBoxedTypeExpr (pr_resp pr)
             reqjb <- J.genJsonBindingExpr cgp (pr_req pr)
             respjb <- J.genJsonBindingExpr cgp (pr_resp pr)
             J.addMethod
@@ -127,6 +128,7 @@ generateJavaReqsClassFile flags cgp javaPackageFn mod requests = execState gen s
               <> cline ");"
               )
       return ()
+
 
 requestName :: T.Text -> T.Text
 requestName = T.toUpper . snakify
