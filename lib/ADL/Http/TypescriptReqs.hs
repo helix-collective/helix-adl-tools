@@ -154,7 +154,7 @@ requestVariable:: CRequestDecl -> TS.CState Code
 requestVariable rd = do
   fields <- getFields (rd_type rd)
   return
-    (  TS.renderCommentsForDeclaration (rd_decl rd)
+    (  TS.renderCommentForDeclaration (rd_decl rd)
     <> ctemplate "const $1 = {" [requestName rd]
     <> indent fields
     <> cline "}"
