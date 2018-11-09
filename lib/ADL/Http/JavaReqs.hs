@@ -85,6 +85,9 @@ generateJavaReqsClassFile flags cgp javaPackageFn mod requests = execState gen s
     gen = do
       httpRequestsI <- J.addImport "au.com.helixta.adl.custom.HttpRequests"
       for_ requests $ \req -> do
+        hpath <- case M.lookup snHttpPath (AST.d_annotations (rd_decl req)) of
+          Just (_,JS.String hpath) -> return hpath
+          _ -> error ("Request " <> T.unpack (AST.d_name (rd_decl req)) <> " is missing a Path attribute")
         let name = requestName (AST.d_name (rd_decl req))
             docstring = J.generateDocString (AST.d_annotations (rd_decl req))
         case rd_type req of
@@ -95,7 +98,8 @@ generateJavaReqsClassFile flags cgp javaPackageFn mod requests = execState gen s
               (  docstring
               <> ctemplate "public static final $1.AdlGetRequest<$2> $3 = new $1.AdlGetRequest<>(" [httpRequestsI, resptype, name]
               <> indent
-                (  ctemplate "$1" [respjb]
+                (  ctemplate "\"$1\"," [hpath]
+                <> ctemplate "$1" [respjb]
                 )
               <> cline ");"
               )
@@ -108,7 +112,8 @@ generateJavaReqsClassFile flags cgp javaPackageFn mod requests = execState gen s
               (  docstring
               <> ctemplate "public static final $1.AdlPostRequest<$2,$3> $4 = new $1.AdlPostRequest<>(" [httpRequestsI, reqtype, resptype, name]
               <> indent
-                (  ctemplate "$1," [reqjb]
+                (  ctemplate "\"$1\"," [hpath]
+                <> ctemplate "$1," [reqjb]
                 <> ctemplate "$1" [respjb]
                 )
               <> cline ");"
@@ -122,13 +127,16 @@ generateJavaReqsClassFile flags cgp javaPackageFn mod requests = execState gen s
               (  docstring
               <> ctemplate "public static final $1.AdlPutRequest<$2,$3> $4 = new $1.AdlPutRequest<>(" [httpRequestsI, reqtype, resptype, name]
               <> indent
-                (  ctemplate "$1," [reqjb]
+                (  ctemplate "\"$1\"," [hpath]
+                <> ctemplate "$1," [reqjb]
                 <> ctemplate "$1" [respjb]
                 )
               <> cline ");"
               )
       return ()
 
+snHttpPath :: AST.ScopedName
+snHttpPath = AST.ScopedName (AST.ModuleName ["common","http"]) "Path"
 
 requestName :: T.Text -> T.Text
 requestName = T.toUpper . snakify

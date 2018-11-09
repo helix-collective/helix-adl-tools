@@ -68,7 +68,7 @@ generateModule :: TypescriptReqFlags ->
 generateModule tf fileWriter m0 = do
   let moduleName = requestsModuleName (AST.m_name m)
       m = associateCustomTypes TS.getCustomType moduleName m0
-      cgp = TS.CodeGenProfile {TS.cgp_includeAst = False}
+      cgp = TS.CodeGenProfile {TS.cgp_includeAst = False, TS.cgp_includeAstAnnotation = const False}
       requestDecls = mapMaybe getRequestDecl (M.elems (AST.m_decls m))
       mf = execState (genRequestsModule m requestDecls) (TS.emptyModuleFile moduleName cgp)
       filepath = TS.moduleFilePath (AST.unModuleName moduleName) <.> "ts"
@@ -86,7 +86,8 @@ genRequestsModule m requestDecls = do
   TS.addDeclaration
     $  cline "export interface PostRequest<I,O> {"
     <> indent
-       (  cline "reqJB: JSON.JsonBinding<I>,"
+       (  cline "path: string,"
+       <> cline "reqJB: JSON.JsonBinding<I>,"
        <> cline "respJB: JSON.JsonBinding<O>,"
        )
     <> cline "};"
@@ -94,14 +95,16 @@ genRequestsModule m requestDecls = do
   TS.addDeclaration
     $  cline "export interface GetRequest<O> {"
     <> indent
-       (  cline "respJB: JSON.JsonBinding<O>,"
+       (  cline "path: string,"
+       <> cline "respJB: JSON.JsonBinding<O>,"
        )
     <> cline "};"
 
   TS.addDeclaration
     $  cline "export interface PutRequest<I,O> {"
     <> indent
-       (  cline "reqJB: JSON.JsonBinding<I>,"
+       (  cline "path: string,"
+       <> cline "reqJB: JSON.JsonBinding<I>,"
        <> cline "respJB: JSON.JsonBinding<O>,"
        )
     <> cline "};"
@@ -152,7 +155,11 @@ requestTypeExpr rd@RequestDecl{rd_type=RT_Put (PostReq itype otype)} = do
 
 requestVariable:: CRequestDecl -> TS.CState Code
 requestVariable rd = do
-  fields <- getFields (rd_type rd)
+  hpath <- case M.lookup snHttpPath (AST.d_annotations (rd_decl rd)) of
+    Just (_,JS.String hpath) -> return hpath
+    _ -> error ("Request " <> T.unpack (AST.d_name (rd_decl rd)) <> " is missing a Path attribute")
+
+  fields <- getFields hpath (rd_type rd)
   return
     (  TS.renderCommentForDeclaration (rd_decl rd)
     <> ctemplate "const $1 = {" [requestName rd]
@@ -160,25 +167,31 @@ requestVariable rd = do
     <> cline "}"
     )
   where
-    getFields (RT_Post (PostReq itype otype)) = do
+    getFields hpath (RT_Post (PostReq itype otype)) = do
       itvexpr <- TS.genTypeValueExpr itype
       otvexpr <- TS.genTypeValueExpr otype
       return
-        (  ctemplate "reqJB: JSON.createJsonBinding(resolver, $1)," [itvexpr]
+        (  ctemplate "path: \"$1\"," [hpath]
+        <> ctemplate "reqJB: JSON.createJsonBinding(resolver, $1)," [itvexpr]
         <> ctemplate "respJB: JSON.createJsonBinding(resolver, $1)," [otvexpr]
         )
-    getFields (RT_Get (GetReq otype)) = do
+    getFields hpath (RT_Get (GetReq otype)) = do
       otvexpr <- TS.genTypeValueExpr otype
       return
-        (  ctemplate "respJB: JSON.createJsonBinding(resolver, $1)," [otvexpr]
+        (  ctemplate "path: \"$1\"," [hpath]
+        <> ctemplate "respJB: JSON.createJsonBinding(resolver, $1)," [otvexpr]
         )
-    getFields (RT_Put (PostReq itype otype)) = do
+    getFields hpath (RT_Put (PostReq itype otype)) = do
       itvexpr <- TS.genTypeValueExpr itype
       otvexpr <- TS.genTypeValueExpr otype
       return
-        (  ctemplate "reqJB: JSON.createJsonBinding(resolver, $1)," [itvexpr]
+        (  ctemplate "path: \"$1\"," [hpath]
+        <> ctemplate "reqJB: JSON.createJsonBinding(resolver, $1)," [itvexpr]
         <> ctemplate "respJB: JSON.createJsonBinding(resolver, $1)," [otvexpr]
         )
+
+snHttpPath :: AST.ScopedName
+snHttpPath = AST.ScopedName (AST.ModuleName ["common","http"]) "Path"
 
 upper1,lower1 :: T.Text -> T.Text
 upper1 t = T.toUpper (T.pack [(T.head t)]) `T.append` T.tail t
