@@ -1,1 +1,4 @@
 .stack-work/
+__pycache__
+.doit.db
+build
