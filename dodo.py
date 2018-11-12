@@ -77,7 +77,7 @@ def task_docker_build_hxadl_image():
     }
 
 def task_docker_push_hxadl_image():
-    tag = str(date.today())
+    tag = get_releasename()
     return {
         'doc' : 'push the hxadl docker image containing adl tooling',
         'actions': [
