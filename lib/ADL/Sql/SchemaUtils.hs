@@ -8,6 +8,9 @@ module ADL.Sql.SchemaUtils
   , instantType
   , localDateType
   , localDateTimeType
+  , postgresDbProfile
+  , mssqlDbProfile
+  , DbProfile
   ) where
 
 import qualified Data.Aeson as JS
@@ -21,7 +24,7 @@ import ADL.Compiler.AST
 import ADL.Compiler.Processing
 import ADL.Utils.IndentedCode
 import ADL.Utils.Format
-import ADL.Sql.Schema
+import ADL.Sql.Schema hiding (PrimitiveType)
 import Data.List(intersperse, sort)
 import Data.Monoid
 import Cases(snakify)
@@ -32,22 +35,66 @@ type RField = Field ResolvedType
 type RAnnotations = Annotations ResolvedType
 type DBTable = (RDecl,Struct ResolvedType,JS.Value)
 
+data DbProfile = DbProfile {
+  dbp_idColumnType :: T.Text,
+  dbp_enumColumnType :: T.Text,
+  dbp_primColumnType :: PrimitiveType -> T.Text
+}
+
+postgresDbProfile = DbProfile {
+  dbp_idColumnType="text",
+  dbp_enumColumnType="text",
+  dbp_primColumnType= \p -> case p of
+    P_String -> "text"
+    P_Int8 -> "smalllint"
+    P_Int16 -> "smalllint"
+    P_Int32 -> "integer"
+    P_Int64 -> "bigint"
+    P_Word8 -> "smalllint"
+    P_Word16 -> "smalllint"
+    P_Word32 -> "integer"
+    P_Word64 -> "bigint"
+    P_Float -> "real"
+    P_Double -> "double precision"
+    P_Bool -> "boolean"
+    _ -> "json"
+}
+
+mssqlDbProfile = DbProfile {
+  dbp_idColumnType="nvarchar(64)",
+  dbp_enumColumnType="nvarchar(64)",
+  dbp_primColumnType= \p -> case p of
+    P_String -> "nvarchar(max)"
+    P_Int8 -> "smalllint"
+    P_Int16 -> "smalllint"
+    P_Int32 -> "int"
+    P_Int64 -> "bigint"
+    P_Word8 -> "smalllint"
+    P_Word16 -> "smalllint"
+    P_Word32 -> "integer"
+    P_Word64 -> "bigint"
+    P_Float -> "float(24)"
+    P_Double -> "float(53)"
+    P_Bool -> "bit"
+    _ -> "nvarchar(max)"
+}
+
 -- Build an abstract db schema from an ADL module
-schemaFromAdl :: (RField -> Column) -> RModule -> Schema
-schemaFromAdl mkColumn mod = Schema
+schemaFromAdl :: DbProfile -> RModule -> Schema
+schemaFromAdl dbp mod = Schema
   { schema_adlModules = [formatText (m_name mod)]
   , schema_tables = tables
   }
   where
-    tables = map (mkTable mkColumn) (mapMaybe matchDBTable (M.elems (m_decls mod)))
+    tables = map (mkTable dbp) (mapMaybe matchDBTable (M.elems (m_decls mod)))
 
 instance Monoid Schema where
   mempty = Schema [] []
   mappend (Schema m1 t1) (Schema m2 t2) = Schema (m1 <> m2) (t1 <> t2)
 
 -- Produce the SQL corresponding to the schema
-sqlFromSchema :: Schema -> Code
-sqlFromSchema schema =  sql
+sqlFromSchema :: DbProfile -> Schema -> Code
+sqlFromSchema dbp schema =  sql
   where
     sql
       =  ctemplate "-- Schema auto-generated from adl modules: $1" [T.intercalate ", " (sort (schema_adlModules schema))]
@@ -97,10 +144,10 @@ tableConstraintsSql table = rconstraints <> uconstraints <> indexes
                            | (TableIndex ti,i) <- zip (table_indexes table) [1,2..]]
 
 
-mkTable :: (RField -> Column) -> DBTable -> Table
-mkTable mkColumn (decl,struct,ann) = Table
+mkTable :: DbProfile -> DBTable -> Table
+mkTable dbp (decl,struct,ann) = Table
   { table_name = tableName
-  , table_columns = idColumn <> map mkColumn (s_fields struct)
+  , table_columns = idColumn <> map (columnFromField dbp) (s_fields struct)
   , table_uniqueConstraints = map UniqueConstraint uconstraints
   , table_indexes = map TableIndex indexes
   , table_primaryKey = primaryKey
@@ -123,7 +170,7 @@ mkTable mkColumn (decl,struct,ann) = Table
 
     idColumn :: [Column]
     idColumn = case getLiteralField ann "withIdPrimaryKey" of
-      Just (JS.Bool True) ->  [Column "id" "text" "" False Nothing]
+      Just (JS.Bool True) ->  [Column "id" (dbp_idColumnType dbp) "" False Nothing]
       _ -> []
 
     primaryKey :: [T.Text]
@@ -148,15 +195,15 @@ data RawColumn c = RawColumn {
   rc_adltype :: TypeExpr (ResolvedTypeT c)
 }
 
-columnFromField :: Field (ResolvedTypeT c) -> Column
-columnFromField field = rc_column (rawColumnFromField field)
+columnFromField :: DbProfile -> Field (ResolvedTypeT c) -> Column
+columnFromField dbp field = rc_column (rawColumnFromField dbp field)
 
-columnTypeFromField :: Field (ResolvedTypeT c) -> TypeExpr (ResolvedTypeT c)
-columnTypeFromField field = rc_adltype (rawColumnFromField field)
+columnTypeFromField :: DbProfile -> Field (ResolvedTypeT c) -> TypeExpr (ResolvedTypeT c)
+columnTypeFromField dbp field = rc_adltype (rawColumnFromField dbp field)
 
 
-rawColumnFromField :: forall c . Field (ResolvedTypeT c) -> RawColumn c
-rawColumnFromField field = mkColumn M.empty False (f_type field)
+rawColumnFromField :: forall c . DbProfile -> Field (ResolvedTypeT c) -> RawColumn c
+rawColumnFromField dbp field = mkColumn M.empty False (f_type field)
   where
     mkColumn :: BoundTypeVariables c -> Bool -> TypeExpr (ResolvedTypeT c) -> RawColumn c
 
@@ -173,7 +220,7 @@ rawColumnFromField field = mkColumn M.empty False (f_type field)
       | typeExprReferences localDateType te = mkRawColumn nullable "date" te
       | typeExprReferences localDateTimeType te = mkRawColumn nullable "timestamp" te
     mkColumn _ nullable te@(TypeExpr ref [])  | isEnumeration2 ref =
-      mkRawColumn nullable "text" te
+      mkRawColumn nullable (dbp_enumColumnType dbp) te
 
     -- typedefs and newtypes are expanded, doing the right thing with type parameters
     mkColumn btv nullable (TypeExpr (RT_Named (_,Decl{d_type=Decl_Typedef t})) tes) =
@@ -190,11 +237,16 @@ rawColumnFromField field = mkColumn M.empty False (f_type field)
 
     -- Primitives
     mkColumn _ nullable te@(TypeExpr (RT_Primitive p) _) =
-      mkRawColumn nullable (primColumnType p) te
+      mkRawColumn nullable (mkColumnType p) te
 
     -- For any other types, just store as json
     mkColumn _ nullable te =
-      mkRawColumn nullable "json" te
+      mkRawColumn nullable (mkColumnType P_Json) te
+
+    mkColumnType :: PrimitiveType -> T.Text
+    mkColumnType ptype = case getAnnotation (f_annotations field) dbColumnTypeType of
+      Just (JS.String ctype) -> ctype
+      Nothing -> (dbp_primColumnType dbp ptype)
 
     columnName = case getAnnotation (f_annotations field) dbColumnNameType of
       Just (JS.String columnName) -> columnName
@@ -205,7 +257,7 @@ rawColumnFromField field = mkColumn M.empty False (f_type field)
       where
         col = Column
           { column_name = columnName
-          , column_ctype = "text"
+          , column_ctype = dbp_idColumnType dbp
           , column_comment = typeExprText (f_type field)
           , column_nullable = nullable
           , column_references = Just (ForeignKeyRef (dbName (sn_name sn)) "id")
@@ -225,21 +277,6 @@ rawColumnFromField field = mkColumn M.empty False (f_type field)
 
 createBoundTypeVariables :: BoundTypeVariables c -> [Ident] -> [TypeExpr (ResolvedTypeT c)] -> BoundTypeVariables c
 createBoundTypeVariables btv names types = M.union btv (M.fromList (zip names types))
-
-primColumnType p =  case p of
-  P_String -> "text"
-  P_Int8 -> "smalllint"
-  P_Int16 -> "smalllint"
-  P_Int32 -> "integer"
-  P_Int64 -> "bigint"
-  P_Word8 -> "smalllint"
-  P_Word16 -> "smalllint"
-  P_Word32 -> "integer"
-  P_Word64 -> "bigint"
-  P_Float -> "real"
-  P_Double -> "double precision"
-  P_Bool -> "boolean"
-  _ -> "json"
 
 -- match structs that are annotated to be
 -- database tables
@@ -289,6 +326,7 @@ typeExprReferences _ _ = False
 
 dbTableType = ScopedName (ModuleName ["common","db"]) "DbTable"
 dbColumnNameType = ScopedName (ModuleName ["common","db"]) "DbColumnName"
+dbColumnTypeType = ScopedName (ModuleName ["common","db"]) "DbColumnType"
 dbKeyType = ScopedName (ModuleName ["common","db"]) "DbKey"
 pkType = ScopedName (ModuleName ["common","db"]) "PK"
 instantType = ScopedName (ModuleName ["common"]) "Instant"

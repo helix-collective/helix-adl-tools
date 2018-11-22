@@ -8,10 +8,10 @@ import qualified Data.Text.Encoding as T
 
 import ADL.Utils.IndentedCode(codeText)
 import ADL.Compiler.EIO
-import ADL.Compiler.Flags(parseArguments,standardOptions,Flags(..))
+import ADL.Compiler.Flags(parseArguments,standardOptions,updateBackendFlags,Flags(..))
 import ADL.Compiler.Processing(loadAndCheckModule,defaultAdlFlags)
 import ADL.Compiler.Utils(writeOutputFile)
-import ADL.Sql.SchemaUtils(schemaFromAdl,columnFromField,sqlFromSchema)
+import ADL.Sql.SchemaUtils(schemaFromAdl,sqlFromSchema, DbProfile, postgresDbProfile, mssqlDbProfile)
 import ADL.Sql.JavaTables(generateJavaTables)
 import ADL.Http.JavaReqs(generateJavaReqs)
 import ADL.Http.TypescriptReqs(generateTypescriptReqs)
@@ -20,6 +20,7 @@ import Data.Monoid((<>), mconcat, mempty)
 import Data.Traversable(for)
 import System.Environment(getArgs)
 import System.Exit(exitWith,ExitCode(..))
+import System.Console.GetOpt
 import System.IO(stderr)
 
 main :: IO ()
@@ -38,18 +39,35 @@ main = do
      T.hPutStrLn stderr "    hx-adl typescript-http-reqs ...args..."
      exitWith (ExitFailure 1)
 
+
+data SchemaFlags = SchemaFlags {
+  sf_dbProfile :: DbProfile
+}
+
+defaultSchemaFlags = SchemaFlags postgresDbProfile
+
+schemaOptions :: [OptDescr (Flags SchemaFlags -> Flags SchemaFlags)]
+schemaOptions
+  =  [ Option "" ["postgres"] (NoArg (updateBackendFlags (\f -> f{sf_dbProfile=postgresDbProfile})))
+       "Generate postgres compatible sql (default)"
+     ,  Option "" ["mssql"] (NoArg (updateBackendFlags (\f -> f{sf_dbProfile=mssqlDbProfile})))
+       "Generate microsoft sqlserver compatible sql"
+     ]
+  <> standardOptions
+
 generateSchema :: [String] -> EIO T.Text ()
 generateSchema args = do
-  (flags,paths) <- parseArguments header defaultAdlFlags () standardOptions args
+  (flags,paths) <- parseArguments header defaultAdlFlags defaultSchemaFlags schemaOptions args
+  let dbp = sf_dbProfile (f_backend flags)
 
   -- Generate a schema for each adl file
   schemas <- for paths $ \path -> do
     rmodule <- loadAndCheckModule (f_adl flags) path
-    return (schemaFromAdl columnFromField rmodule)
+    return (schemaFromAdl dbp rmodule)
 
   -- Compute the SQL for the aggregate schema
   let schema = mconcat schemas
-      sql = sqlFromSchema schema
+      sql = sqlFromSchema dbp schema
       t = T.intercalate "\n" (codeText Nothing sql)
 
   -- Write it out

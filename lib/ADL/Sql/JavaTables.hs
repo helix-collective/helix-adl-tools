@@ -79,7 +79,7 @@ generateJavaTables args = do
   for_ paths $ \path -> do
     (mod0,moddeps) <- loadAndCheckModule1 (f_adl flags) path
     let javaPackageFn = J.mkJavaPackageFn cgp (mod0:moddeps) (J.javaPackage (jt_package (f_backend flags)))
-        schema = SC.schemaFromAdl SC.columnFromField mod0
+        schema = SC.schemaFromAdl SC.postgresDbProfile mod0
         mod = ( associateCustomTypes J.getCustomType (AST.m_name mod0)
               . removeModuleTypedefs
               . expandModuleTypedefs
@@ -311,6 +311,8 @@ javaDbType :: SC.Column -> AST.Field J.CResolvedType -> T.Text
 javaDbType col field
   | refEnumeration (AST.f_type field) = "String"
   | SC.column_ctype col == "text" = "String"
+  | "varchar" `T.isPrefixOf` SC.column_ctype col = "String"
+  | "nvarchar" `T.isPrefixOf` SC.column_ctype col = "String"
   | SC.column_ctype col == "boolean" = "Boolean"
   | SC.column_ctype col == "json" = "JsonElement"
   | SC.column_ctype col == "bigint" = "Long"
@@ -319,9 +321,10 @@ javaDbType col field
   | SC.typeExprReferences SC.localDateTimeType te = "java.time.LocalDateTime"
   | SC.typeExprReferences SC.localDateType te = "java.time.LocalDate"
   | SC.column_ctype col == "double precision" = "Double"
+  | "float" `T.isPrefixOf` SC.column_ctype col = "Double"
   | otherwise = "unimp:" <> SC.column_ctype col
   where
-    te = SC.columnTypeFromField field
+    te = SC.columnTypeFromField SC.postgresDbProfile field
 
 -- Generate an expression converting a db value into an ADL value
 adlFromDbExpr :: SC.Column -> AST.Field J.CResolvedType -> T.Text -> J.CState T.Text

@@ -59,8 +59,8 @@ def task_docker_build_hxadl_image():
     image = DockerImage( 'hxadl', context)
     image.cmd( 'FROM ubuntu:16.04' )
     image.cmd( 'MAINTAINER Helix Team <support@helixta.com.au>' )
-    image.cmd( 'COPY {} /tmp'.format(hxadlzip.name) )
     image.cmd( 'RUN apt-get update && apt-get install -y zip libgmp-dev' )
+    image.cmd( 'COPY {} /tmp'.format(hxadlzip.name) )
     image.cmd( 'RUN unzip /tmp/{0} -d /opt && rm -r /tmp/{0}'.format(hxadlzip.name) )
     image.cmd( 'ENV PATH="/opt/bin:${PATH}"')
 
