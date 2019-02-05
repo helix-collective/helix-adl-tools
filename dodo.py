@@ -14,6 +14,7 @@ def dockerized_stack(args,workdir):
     uid,gid = os.getuid(),os.getgid()
     cmd =  "docker run -it --rm "
     cmd += "-v /home/{0}/.stack:/home/{0}/.stack ".format(user)
+    cmd += "-v /home/{0}/.ssh:/home/{0}/.ssh ".format(user)
     cmd += "-v {0}:{0} ".format(HERE.resolve())
     cmd += "-v /etc/passwd:/etc/passwd "
     cmd += "-v /etc/group:/etc/group "
