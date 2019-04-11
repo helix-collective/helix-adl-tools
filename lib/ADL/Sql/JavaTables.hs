@@ -320,6 +320,7 @@ javaDbType col field
   | SC.typeExprReferences SC.instantType te  = "java.time.Instant"
   | SC.typeExprReferences SC.localDateTimeType te = "java.time.LocalDateTime"
   | SC.typeExprReferences SC.localDateType te = "java.time.LocalDate"
+  | SC.typeExprReferences SC.geographyType te = "org.postgis.PGgeometry"
   | SC.column_ctype col == "double precision" = "Double"
   | "float" `T.isPrefixOf` SC.column_ctype col = "Double"
   | otherwise = "unimp:" <> SC.column_ctype col
@@ -342,6 +343,7 @@ adlFromDbExpr col field expr = do
             "v" -> ""
             _ -> template ".map(v -> $1)" [expr1]
       return (template "Optional.ofNullable($1)$2" [expr,mapExpr])
+    (False,_,"geography",_) -> return expr
     (False,Just _,_,_) -> do
       return (template "new $1($2)" [J.fd_typeExprStr fdetails,expr])
     (False,_,"timestamp",_) -> return expr
@@ -371,6 +373,7 @@ dbFromAdlExpr col field expr = do
             "v" -> ""
             _ -> template ".map(v -> $1)" [expr1]
       return (template "$1$2.orElse(null)" [expr,mapExpr])
+    (False,_,"geography",_) -> return expr
     (False,Just _,_,_) -> do
       return (template "$1.getValue()" [expr])
     (False,_,"timestamp",_) -> return expr

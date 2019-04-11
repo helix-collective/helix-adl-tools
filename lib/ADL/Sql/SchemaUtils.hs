@@ -6,6 +6,7 @@ module ADL.Sql.SchemaUtils
   , columnTypeFromField
   , typeExprReferences
   , instantType
+  , geographyType
   , localDateType
   , localDateTimeType
   , postgresDbProfile
@@ -219,6 +220,7 @@ rawColumnFromField dbp field = mkColumn M.empty False (f_type field)
       | typeExprReferences instantType te = mkRawColumn nullable "timestamp" te
       | typeExprReferences localDateType te = mkRawColumn nullable "date" te
       | typeExprReferences localDateTimeType te = mkRawColumn nullable "timestamp" te
+      | typeExprReferences geographyType te = mkRawColumn nullable "geography" te
     mkColumn _ nullable te@(TypeExpr ref [])  | isEnumeration2 ref =
       mkRawColumn nullable (dbp_enumColumnType dbp) te
 
@@ -332,4 +334,5 @@ pkType = ScopedName (ModuleName ["common","db"]) "PK"
 instantType = ScopedName (ModuleName ["common"]) "Instant"
 localDateType = ScopedName (ModuleName ["common"]) "LocalDate"
 localDateTimeType = ScopedName (ModuleName ["common"]) "LocalDateTime"
+geographyType = ScopedName (ModuleName ["common"]) "Geography"
 maybeType = ScopedName (ModuleName ["sys","types"]) "Maybe"
