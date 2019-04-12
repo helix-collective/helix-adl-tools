@@ -111,13 +111,14 @@ generateJavaModel jtflags cgp javaPackageFn mod (decl,struct,table,dbTableAnnota
     javaClassNameT = javaClassName decl
     dbTableNameT = dbTableName decl
     gen = do
+      rtPackage <- J.getRuntimePackage
       J.addImport "au.com.helixta.nofrills.sql.Dsl"
       J.addImport "au.com.helixta.nofrills.sql.Dsl.Table"
       J.addImport "au.com.helixta.nofrills.sql.Dsl.FieldRef"
       J.addImport "au.com.helixta.nofrills.sql.Dsl.TypedField"
       J.addImport "au.com.helixta.nofrills.sql.impl.DbResults"
       J.addImport "au.com.helixta.util.sql.QueryHelper"
-      J.addImport "au.com.helixta.adl.runtime.JsonBindings"
+      J.addImport (J.javaClass rtPackage "JsonBindings")
       J.addImport "com.google.common.collect.ImmutableMap"
       J.addImport "com.google.common.collect.Maps"
       J.addImport "com.google.gson.JsonElement"
@@ -221,8 +222,8 @@ generateJavaModel jtflags cgp javaPackageFn mod (decl,struct,table,dbTableAnnota
         )
 
     genFromDbResultsWithIdKey fields = do
-      withDbIdI <- J.addImport "au.com.helixta.adl.common.db.WithDbId"
-      dbKeyI <- J.addImport "au.com.helixta.adl.common.db.DbKey"
+      withDbIdI <- J.genScopedName withDbIdType
+      dbKeyI <- J.genScopedName dbKeyType
 
       ctorargs <- for fields $ \(dbc,col,field) -> do
         adlFromDbExpr col field (template "res.get($1())" [AST.f_name field])
@@ -237,7 +238,7 @@ generateJavaModel jtflags cgp javaPackageFn mod (decl,struct,table,dbTableAnnota
         )
 
     genDbMappingWithIdKey fields = do
-      dbKeyI <- J.addImport "au.com.helixta.adl.common.db.DbKey"
+      dbKeyI <- J.genScopedName dbKeyType
       getters <- for fields $ \(dbc,col,field) -> do
           dbFromAdlExpr col field (template "value.get$1()" [J.javaCapsFieldName field])
 
@@ -251,7 +252,7 @@ generateJavaModel jtflags cgp javaPackageFn mod (decl,struct,table,dbTableAnnota
         )
 
     crudHelperFns = do
-      dbKeyI <- J.addImport "au.com.helixta.adl.common.db.DbKey"
+      dbKeyI <- J.genScopedName dbKeyType
 
       J.addMethod
         ( cblock (template "public $1<$2> create(Supplier<String> idSupplier, QueryHelper.Context ctx, $2 value)" [dbKeyI, javaClassNameT])
@@ -405,6 +406,8 @@ dbFromAdlExpr col field expr = do
                   Nothing -> return expr
 
 dbTableType = AST.ScopedName (AST.ModuleName ["common","db"]) "DbTable"
+withDbIdType = AST.ScopedName (AST.ModuleName ["common","db"]) "WithDbId"
+dbKeyType = AST.ScopedName (AST.ModuleName ["common","db"]) "DbKey"
 
 -- ----------------------------------------------------------------------
 -- -- helper stuff
