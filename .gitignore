@@ -3,3 +3,5 @@ __pycache__
 .doit.db
 build
 /.doit*
+/typescript/hx-adl/node_modules
+/typescript/hx-adl/build

@@ -1,0 +1,3 @@
+[submodule "haskell/adl"]
+	path = haskell/adl
+	url = git@github.com:timbod7/adl.git

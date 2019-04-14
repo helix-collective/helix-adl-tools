@@ -165,6 +165,7 @@ class DockerContext(object):
                 destfile = ctxDir/item[2]
                 os.makedirs( str(destfile.parent), exist_ok=True)
                 shutil.copyfile(str(item[1]), str(ctxDir/item[2]))
+                shutil.copymode(str(item[1]), str(ctxDir/item[2]))
             elif item[0] == DockerContext.FILE_CONTENT:
                 destfile = ctxDir/item[2]
                 os.makedirs( str(destfile.parent), exist_ok=True)
