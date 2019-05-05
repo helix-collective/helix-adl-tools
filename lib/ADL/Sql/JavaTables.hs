@@ -315,6 +315,7 @@ javaDbType col field
   | "nvarchar" `T.isPrefixOf` SC.column_ctype col = "String"
   | SC.column_ctype col == "boolean" = "Boolean"
   | SC.column_ctype col == "json" = "JsonElement"
+  | SC.column_ctype col == "jsonb" = "JsonElement"
   | SC.column_ctype col == "bigint" = "Long"
   | SC.column_ctype col == "integer" = "Integer"
   | SC.typeExprReferences SC.instantType te  = "java.time.Instant"
@@ -339,6 +340,9 @@ adlFromDbExpr col field expr = do
     (True, _, "json", AST.TypeExpr _ [te]) -> do
       jbindingExpr <- J.genJsonBindingExpr cgp te
       return (template "Optional.ofNullable($1).map($2::fromJson)" [expr,jbindingExpr])
+    (True, _, "jsonb", AST.TypeExpr _ [te]) -> do
+      jbindingExpr <- J.genJsonBindingExpr cgp te
+      return (template "Optional.ofNullable($1).map($2::fromJson)" [expr,jbindingExpr])
     (True, _, _, AST.TypeExpr _ [te]) -> do
       expr1 <- adlFromDbExpr col{SC.column_nullable=False} field{AST.f_type=te,AST.f_default=Nothing} "v"
       let mapExpr = case expr1 of
@@ -352,6 +356,9 @@ adlFromDbExpr col field expr = do
     (False,_,"timestamp",_) -> return expr
     (False,_,"date",_) -> return expr
     (False,_,"json",_) -> do
+      jbindingExpr <- J.genJsonBindingExpr cgp ftype
+      return (template "$1.fromJson($2)" [jbindingExpr,expr])
+    (False,_,"jsonb",_) -> do
       jbindingExpr <- J.genJsonBindingExpr cgp ftype
       return (template "$1.fromJson($2)" [jbindingExpr,expr])
     (False,_,_,_)
@@ -370,6 +377,9 @@ dbFromAdlExpr col field expr = do
     (True, _, "json", AST.TypeExpr _ [te]) -> do
       jbindingExpr <- J.genJsonBindingExpr cgp te
       return (template "($1.isPresent() ? $2.toJson($1.get()) : null)" [expr, jbindingExpr])
+    (True, _, "jsonb", AST.TypeExpr _ [te]) -> do
+      jbindingExpr <- J.genJsonBindingExpr cgp te
+      return (template "($1.isPresent() ? $2.toJson($1.get()) : null)" [expr, jbindingExpr])
     (True, _, _, AST.TypeExpr _ [te]) -> do
       expr1 <- dbFromAdlExpr col{SC.column_nullable=False} field{AST.f_type=te,AST.f_default=Nothing} "v"
       let mapExpr = case expr1 of
@@ -383,6 +393,9 @@ dbFromAdlExpr col field expr = do
     (False,_,"timestamp",_) -> return expr
     (False,_,"date",_) -> return expr
     (False,_,"json",_) -> do
+      jbindingExpr <- J.genJsonBindingExpr cgp ftype
+      return (template "$1.toJson($2)" [jbindingExpr,expr])
+    (False,_,"jsonb",_) -> do
       jbindingExpr <- J.genJsonBindingExpr cgp ftype
       return (template "$1.toJson($2)" [jbindingExpr,expr])
     (False,_,_,_)

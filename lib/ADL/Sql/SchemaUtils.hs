@@ -12,6 +12,7 @@ module ADL.Sql.SchemaUtils
   , localDateType
   , localDateTimeType
   , postgresDbProfile
+  , postgresDbProfileV2
   , mssqlDbProfile
   , DbProfile
   ) where
@@ -61,6 +62,25 @@ postgresDbProfile = DbProfile {
     P_Double -> "double precision"
     P_Bool -> "boolean"
     _ -> "json"
+}
+
+postgresDbProfileV2 = DbProfile {
+  dbp_idColumnType="text",
+  dbp_enumColumnType="text",
+  dbp_primColumnType= \p -> case p of
+    P_String -> "text"
+    P_Int8 -> "smalllint"
+    P_Int16 -> "smalllint"
+    P_Int32 -> "integer"
+    P_Int64 -> "bigint"
+    P_Word8 -> "smalllint"
+    P_Word16 -> "smalllint"
+    P_Word32 -> "integer"
+    P_Word64 -> "bigint"
+    P_Float -> "real"
+    P_Double -> "double precision"
+    P_Bool -> "boolean"
+    _ -> "jsonb"
 }
 
 mssqlDbProfile = DbProfile {
@@ -245,7 +265,7 @@ rawColumnFromField dbp field = mkColumn M.empty False (f_type field)
     mkColumn _ nullable te@(TypeExpr (RT_Primitive p) _) =
       mkRawColumn nullable (mkColumnType p) te
 
-    -- For any other types, just store as json
+    -- For any other types, just store as jsonb
     mkColumn _ nullable te =
       mkRawColumn nullable (mkColumnType P_Json) te
 
