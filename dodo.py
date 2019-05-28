@@ -9,23 +9,6 @@ hxadlzip = HERE/'build/hxadl.zip'
 hxadlimagebuilt = MarkerFile(HERE/'build/.hxadlimagebuilt')
 hxadlimagepushed = MarkerFile(HERE/'build/.hxadlimagepushed')
 
-def dockerized_stack(args,workdir):
-    user = getpass.getuser()
-    uid,gid = os.getuid(),os.getgid()
-    cmd =  "docker run -it --rm "
-    cmd += "-v /home/{0}/.stack:/home/{0}/.stack ".format(user)
-    cmd += "-v /home/{0}/.ssh:/home/{0}/.ssh ".format(user)
-    cmd += "-v {0}:{0} ".format(HERE.resolve())
-    cmd += "-v /etc/passwd:/etc/passwd "
-    cmd += "-v /etc/group:/etc/group "
-    cmd += "-v /tmp:/tmp "
-    cmd += "--user {}:{} ".format(uid,gid)
-    cmd += "-w {0} ".format(workdir.resolve())
-    cmd += "helixta/helixdev:2018-04-17 "
-    cmd += "stack "
-    cmd += ' '.join(args)
-    return cmd
-
 def task_build():
     filedeps = rglobfiles(HERE/'src')
     filedeps += rglobfiles(HERE/'lib')
@@ -35,7 +18,12 @@ def task_build():
     return {
         'doc' : 'build adlc and hx-adl for linux',
         'actions': [
-            dockerized_stack(['build', '--no-nix', '&& mkdir -p {0}/bin && cp `stack --no-nix exec which -- hx-adl` {0}/bin && cp `stack --no-nix exec which -- adlc` {0}/bin && cp -r `stack --no-nix exec adlc -- show --adlstdlib`/.. {0}/lib'.format(distdir)], workdir=HERE),
+            stack(['docker', 'pull']),
+            stack(['build']),
+            'mkdir -p {0}/bin'.format(distdir),
+            'cp $({}) {}/bin'.format(stack(['exec', 'which', '--', 'adlc']),distdir),
+            'cp $({}) {}/bin'.format(stack(['exec', 'which', '--', 'hx-adl']),distdir),
+            'cp -r $({})/.. {}/lib'.format(stack(['exec', 'adlc', '--', 'show', '--adlstdlib']), distdir),
             'cd {}; zip -q -r {} *'.format(distdir, hxadlzip.resolve())
         ],
         'file_dep': filedeps,
@@ -58,7 +46,7 @@ def task_docker_build_hxadl_image():
     context.file(hxadlzip, hxadlzip.name)
 
     image = DockerImage( 'hxadl', context)
-    image.cmd( 'FROM ubuntu:16.04' )
+    image.cmd( 'FROM ubuntu:18.04' )
     image.cmd( 'MAINTAINER Helix Team <support@helixta.com.au>' )
     image.cmd( 'RUN apt-get update && apt-get install -y zip libgmp-dev' )
     image.cmd( 'COPY {} /tmp'.format(hxadlzip.name) )
@@ -90,3 +78,7 @@ def task_docker_push_hxadl_image():
         'verbosity' : 2,
         'clean' : True
     }
+
+def stack(args):
+    return 'stack --stack-yaml={} --docker {}'.format(HERE/'stack.yaml',' '.join(args))
+
