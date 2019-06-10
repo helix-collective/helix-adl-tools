@@ -11,7 +11,7 @@ import ADL.Compiler.EIO
 import ADL.Compiler.Flags(parseArguments,standardOptions,updateBackendFlags,Flags(..))
 import ADL.Compiler.Processing(loadAndCheckModule,defaultAdlFlags)
 import ADL.Compiler.Utils(writeOutputFile)
-import ADL.Sql.SchemaUtils(schemaFromAdl,sqlFromSchema, DbProfile, postgresDbProfile, mssqlDbProfile)
+import ADL.Sql.SchemaUtils(schemaFromAdl,sqlFromSchema, DbProfile, postgresDbProfile, postgresDbProfileV2, mssqlDbProfile)
 import ADL.Sql.JavaTables(generateJavaTables)
 import ADL.Http.JavaReqs(generateJavaReqs)
 import ADL.Http.TypescriptReqs(generateTypescriptReqs)
@@ -50,6 +50,10 @@ schemaOptions :: [OptDescr (Flags SchemaFlags -> Flags SchemaFlags)]
 schemaOptions
   =  [ Option "" ["postgres"] (NoArg (updateBackendFlags (\f -> f{sf_dbProfile=postgresDbProfile})))
        "Generate postgres compatible sql (default)"
+
+     ,  Option "" ["postgres-v2"] (NoArg (updateBackendFlags (\f -> f{sf_dbProfile=postgresDbProfileV2})))
+       "Generate postgres 9.6+ compatible sql (eg including jsonb)"
+
      ,  Option "" ["mssql"] (NoArg (updateBackendFlags (\f -> f{sf_dbProfile=mssqlDbProfile})))
        "Generate microsoft sqlserver compatible sql"
      ]
