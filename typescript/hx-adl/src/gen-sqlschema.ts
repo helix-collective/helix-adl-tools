@@ -2,7 +2,7 @@ import * as adlast from './adl-gen/sys/adlast';
 import * as adl from "./adl-gen/runtime/adl";
 import { collect, scopedName, scopedNamesEqual, expandNewType, expandTypeAlias, parseAdl, forEachDecl, getAnnotation, decodeTypeExpr, DecodedTypeExpr } from "./util";
 import * as fs from "fs";
-import { isEnum, typeExprToStringUnscoped } from './adl-gen/runtime/utils';
+import { isEnum, typeExprToString } from './adl-gen/runtime/utils';
 import { Command } from "commander";
 import { snakeCase } from "change-case";
 import { execHxAdlHs } from "./util";
@@ -17,17 +17,18 @@ export function configureCli(program: Command) {
    .option('--postgres-v2', 'Generate sql for postgres (model version 2)')
    .option('--mssql', 'Generate sql for microsoft sqlserver')
    .description('Generate a db schema from ADL files')
-   .action( (_adlFiles:string[], cmd:{}) => {
-// Continue to use the haskell sql generator until the output of the code below
-// is made consistent
-//
-//     const adlSearchPath: string[] = cmd['searchdir'];
-//     let outfile: string = cmd['outfile'];
-//     if (cmd['outputdir']) {
-//       outfile = cmd['outputdir'] + '/create.sql';
-//     }
-//  generateSqlSchema({adlFiles, adlSearchPath, outfile});
-     execHxAdlHs(cmd['parent'].rawArgs.slice(2));
+   .action( (adlFiles:string[], cmd:{}) => {
+     const adlSearchPath: string[] = cmd['searchdir'];
+     let outfile: string = cmd['outfile'];
+     if (cmd['outputdir']) {
+       outfile = cmd['outputdir'] + '/create.sql';
+     }
+     let dbProfile: DbProfile = postgresDbProfile;
+     if (cmd['mssql']) {
+       dbProfile = mssqlDbProfile;
+     }
+
+     generateSqlSchema({adlFiles, adlSearchPath, outfile, dbProfile});
    });
 }
 
@@ -35,6 +36,7 @@ export interface Params {
   adlFiles: string[];
   adlSearchPath: string[];
   outfile: string;
+  dbProfile: DbProfile;
 };
 
 export async function generateSqlSchema(params: Params): Promise<void> {
@@ -82,14 +84,14 @@ export async function generateSqlSchema(params: Params): Promise<void> {
 
     const lines: {code:string, comment?:string}[] = [];
     if (withIdPrimaryKey) {
-      lines.push({code: 'id text not null'});
+      lines.push({code: 'id ' + params.dbProfile.idColumnType + ' not null'});
     }
     for(const f of t.struct.value.fields) {
       const columnName = getColumnName(f);
-      const columnType = getColumnType(loadedAdl.resolver, f.typeExpr);
+      const columnType = getColumnType(params.dbProfile, loadedAdl.resolver, f.typeExpr);
       lines.push({
         code: `${columnName} ${columnType.sqltype}`,
-        comment: typeExprToStringUnscoped(f.typeExpr),
+        comment: typeExprToString(f.typeExpr),
       });
       if (columnType.fkey) {
         constraints.push(`alter table ${t.name} add constraint ${t.name}_${columnName}_fk foreign key (${columnName}) references ${columnType.fkey.table}(${columnType.fkey.column});`);
@@ -187,41 +189,27 @@ interface ColumnType {
 };
 
 
-function getColumnType(resolver: adl.DeclResolver, typeExpr: adlast.TypeExpr): ColumnType {
+function getColumnType(dbProfile: DbProfile, resolver: adl.DeclResolver, typeExpr: adlast.TypeExpr): ColumnType {
   // For Maybe<T> and Nullable<T> the sql column will allow nulls
   const dtype = decodeTypeExpr(typeExpr);
   if(dtype.kind == 'Nullable' ||
      dtype.kind == 'Reference' && scopedNamesEqual(dtype.refScopedName, MAYBE)
     ) {
-    return {
-      sqltype: getColumnType1(resolver, typeExpr.parameters[0]),
-      fkey: getForeignKeyRef(resolver, typeExpr.parameters[0])
-    };
+    const fkey = getForeignKeyRef(resolver, typeExpr.parameters[0]);
+    const sqltype = fkey == undefined ? getColumnType1(dbProfile, resolver, typeExpr.parameters[0]) : dbProfile.idColumnType;
+    return {sqltype,fkey};
   }
 
   // For all other types, the column will not allow nulls
   return {
-    sqltype: getColumnType1(resolver, typeExpr) + " not null",
+    sqltype: getColumnType1(dbProfile, resolver, typeExpr) + " not null",
     fkey: getForeignKeyRef(resolver, typeExpr)
   };
 }
 
-function getColumnType1(resolver: adl.DeclResolver, typeExpr: adlast.TypeExpr): string {
+function getColumnType1(dbProfile: DbProfile, resolver: adl.DeclResolver, typeExpr: adlast.TypeExpr): string {
   const dtype = decodeTypeExpr(typeExpr);
   switch(dtype.kind) {
-    case "String": return "text";
-    case "Bool": return "boolean";
-    case "Json": return "json";
-    case "Int8" : return "smallint";
-    case "Int16" : return "smallint";
-    case "Int32" : return "integer";
-    case "Int64" : return "bigint";
-    case "Word8" : return "smallint";
-    case "Word16" : return "smallint";
-    case "Word32" : return "integer";
-    case "Word64" : return "bigint";
-    case "Float": return "real";
-    case "Double": return "double precision";
     case "Reference":
       const sdecl = resolver(dtype.refScopedName);
 
@@ -232,7 +220,7 @@ function getColumnType1(resolver: adl.DeclResolver, typeExpr: adlast.TypeExpr): 
       } else if (scopedNamesEqual(dtype.refScopedName, LOCAL_DATETIME)) {
         return "timestamp";
       } else if (sdecl.decl.type_.kind == 'union_' && isEnum(sdecl.decl.type_.value)) {
-        return "text";
+        return dbProfile.enumColumnType;
       }
       // If we have a reference to a newtype or type alias, resolve
       // to the underlying type
@@ -240,10 +228,10 @@ function getColumnType1(resolver: adl.DeclResolver, typeExpr: adlast.TypeExpr): 
       texpr2 = texpr2 || expandTypeAlias(resolver, typeExpr);
       texpr2 = texpr2 || expandNewType(resolver, typeExpr);
       if (texpr2) {
-        return getColumnType1(resolver, texpr2);
+        return getColumnType1(dbProfile, resolver, texpr2);
       }
   }
-  return "json";
+  return dbProfile.primColumnType(dtype.kind);
 }
 
 function getForeignKeyRef(resolver: adl.DeclResolver, typeExpr: adlast.TypeExpr): {table:string, column:string} | undefined {
@@ -256,6 +244,60 @@ function getForeignKeyRef(resolver: adl.DeclResolver, typeExpr: adlast.TypeExpr)
   }
   return undefined;
 }
+
+interface DbProfile {
+  idColumnType: string;
+  enumColumnType: string;
+  primColumnType(primtype: string): string;
+};
+
+const postgresDbProfile : DbProfile = {
+  idColumnType: 'text',
+  enumColumnType: 'text',
+  primColumnType: (primtype: string) =>  {
+    switch (primtype) {
+      case "String": return "text";
+      case "Bool": return "boolean";
+      case "Json": return "json";
+      case "Int8" : return "smallint";
+      case "Int16" : return "smallint";
+      case "Int32" : return "integer";
+      case "Int64" : return "bigint";
+      case "Word8" : return "smallint";
+      case "Word16" : return "smallint";
+      case "Word32" : return "integer";
+      case "Word64" : return "bigint";
+      case "Float": return "real";
+      case "Double": return "double precision";
+      default: return "json";
+    }
+  }
+};
+
+const mssqlDbProfile : DbProfile = {
+  idColumnType: 'nvarchar(64)',
+  enumColumnType: 'nvarchar(64)',
+  primColumnType: (primtype: string) =>  {
+    switch (primtype) {
+      case "String": return "nvarchar(max)";
+      case "Bool": return "bit";
+      case "Json": return "nvarchar(max)";
+      case "Int8" : return "smallint";
+      case "Int16" : return "smallint";
+      case "Int32" : return "int";
+      case "Int64" : return "bigint";
+      case "Word8" : return "smallint";
+      case "Word16" : return "smallint";
+      case "Word32" : return "integer";
+      case "Word64" : return "bigint";
+      case "Float": return "float(24)";
+      case "Double": return "float(53)";
+      default: return "nvarchar(max)";
+    }
+  }
+};
+
+
 
 
 const MAYBE = scopedName("sys.types", "Maybe");
