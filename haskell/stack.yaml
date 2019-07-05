@@ -1,10 +1,8 @@
 flags: {}
-resolver: lts-10.10
+resolver: lts-13.26
 packages:
-- location: .
-  subdirs:
-  - hx-adl
-  - adl/haskell/utils
-  - adl/haskell/runtime
-  - adl/haskell/compiler-lib
-  - adl/haskell/compiler
+- hx-adl
+- adl/haskell/utils
+- adl/haskell/runtime
+- adl/haskell/compiler-lib
+- adl/haskell/compiler

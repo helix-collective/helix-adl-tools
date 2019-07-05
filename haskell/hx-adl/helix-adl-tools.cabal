@@ -17,7 +17,7 @@ executable hx-adl-hs
   main-is:             Main.hs
   default-language:    Haskell2010
   build-depends:       base >= 4.7 && < 5
-                     , aeson >= 1.0.2.1 && < 1.3
+                     , aeson >= 1.0.2.1 && < 1.5
                      , adl-runtime
                      , adl-utils
                      , adl-compiler-lib
@@ -26,7 +26,7 @@ executable hx-adl-hs
                      , base64-bytestring >= 1.0.0.1 && < 1.1
                      , bytestring >= 0.10.8.1 && < 0.11
                      , cases >= 0.1.3.2 && < 0.2
-                     , containers >= 0.5.7.1 && < 0.6
+                     , containers >= 0.5.7.1 && < 0.7
                      , directory >= 1.3 && < 1.4
                      , filepath >= 1.4 && < 1.5
                      , mtl >= 2.2.1 && < 2.3
@@ -46,7 +46,7 @@ library
                      , ADL.Http.Utils
   default-language:    Haskell2010
   build-depends:       base >= 4.7 && < 5
-                     , aeson >= 1.0.2.1 && < 1.3
+                     , aeson >= 1.0.2.1 && < 1.5
                      , adl-runtime
                      , adl-utils
                      , adl-compiler-lib
@@ -54,7 +54,7 @@ library
                      , base64-bytestring >= 1.0.0.1 && < 1.1
                      , bytestring >= 0.10.8.1 && < 0.11
                      , cases >= 0.1.3.2 && < 0.2
-                     , containers >= 0.5.7.1 && < 0.6
+                     , containers >= 0.5.7.1 && < 0.7
                      , directory >= 1.3 && < 1.4
                      , filepath >= 1.4 && < 1.5
                      , mtl >= 2.2.1 && < 2.3

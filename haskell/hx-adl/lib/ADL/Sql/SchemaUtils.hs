@@ -22,6 +22,7 @@ import qualified Data.HashMap.Strict as HM
 import qualified Data.Map as M
 import qualified Data.Text as T
 import qualified Data.Vector as V
+import qualified Data.Semigroup as S
 
 import ADL.Compiler.Primitive
 import ADL.Compiler.AST
@@ -111,9 +112,12 @@ schemaFromAdl dbp mod = Schema
   where
     tables = map (mkTable dbp) (mapMaybe matchDBTable (M.elems (m_decls mod)))
 
+instance S.Semigroup Schema where
+  (Schema m1 t1) <> (Schema m2 t2) = Schema ((S.<>) m1 m2) ((S.<>) t1 t2)
+  
 instance Monoid Schema where
   mempty = Schema [] []
-  mappend (Schema m1 t1) (Schema m2 t2) = Schema (m1 <> m2) (t1 <> t2)
+  mappend = (S.<>)
 
 -- Produce the SQL corresponding to the schema
 sqlFromSchema :: DbProfile -> Schema -> Code
