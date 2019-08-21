@@ -1,0 +1,81 @@
+/*
+ * The definitive list of colors to be used in the app. Colors should never
+ * be referenced by hex code outside this file. All colors should be represented in
+ * the list below.
+ *
+ * Please name colors with the appropriate prefix to avoid conflicts with
+ * native browser colors:
+ *
+ * All new colors should appear in storybook
+ */
+
+/** Primary colors */
+
+@value colorEarthGreen: #8ae58a;
+@value colorElectricNeon100: #3ccbda;
+@value colorElectricNeon20: #d8f5f8;
+@value colorElectricNeonDark050: #317d91;
+@value colorPrecisionBlack005: #f3f4f6;
+@value colorPrecisionBlack010: #e7e8ea;
+@value colorPrecisionBlack020: #d0d1d6;
+@value colorPrecisionBlack070: #5b5f6d;
+@value colorPrecisionBlack080: #454959;
+@value colorPrecisionBlack090: #2d3144;
+@value colorPrecisionBlack100: #161b30;
+@value colorPrecisionBlackTransparent080: rgba(22,27,48,0.4);
+@value colorRedEnergy100: #d0021b;
+@value colorSeaStormTeal100: #007184;
+@value colorSeaStormTeam020: #c7e4e8;
+@value colorStrikingYellow: #f9f18d;
+@value colorVitaminOrange: #fec66a;
+@value colorWhite: #ffffff;
+
+/** Text colors */
+
+@value colorTextDefault: #2D3144;
+@value colorTextDark: #29304a;
+@value colorTextInactive: #b9bac0;
+@value colorTextLight: #ffffff;
+@value colorTextLightSecondary: #9698a1;
+@value colorTextSecondaryDark: #676b78;
+
+
+/** LEGACY COLORS */
+/* TODO(lois): Remove once not used */
+@value colorBlackish: #333333;
+@value colorBlueish: #0d9eb0;
+@value colorGrayish: #666666;
+@value colorLightGrayish: #f4f4f4;
+@value colorTopaz: #0d9eb0;
+@value colorTealish: #3dc4d4;
+@value colorLightGreenish: #f0ffe1;
+
+/** Veyor styles below */
+
+@value colorBlack: #000000;
+@value colorCobalt: #1574e0;
+@value colorRed: #b71c1c;
+@value colorOrange: #ec5f00;
+@value colorGreen: #00a300;
+@value colorCharcoal: #4a4a4a;
+@value colorLead: #757575;
+@value colorAsh: #9b9b9b;
+@value colorSilver: #d8d8d8;
+@value colorMustard: #f3E100;
+@value colorDarkSeaGreen: #99a18c;
+
+
+@value colorDarkGray: #999999;
+@value colorBlue: #1700f8;
+@value colorYellow: #feff48;
+@value colorGoldenrod: #fc9a2f;
+@value colorDarkViolet: #9800f8;
+
+@value colorSilverTransparent: rgba(0, 0, 0, 0.12);
+
+@value colorGreenLight: #d3efd2;
+@value colorRedLight: #f3d8d8;
+@value colorOrangeLight: #FED8B1;
+@value colorCharcoalLight: #eeeeee;
+@value colorCustard: #fcf6aa;
+ 

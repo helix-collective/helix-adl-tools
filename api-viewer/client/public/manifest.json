@@ -1,0 +1,10 @@
+{
+  "short_name": "adl api",
+  "name": "adl api",
+  "icons": [
+  ],
+  "start_url": "./index.html",
+  "display": "standalone",
+  "theme_color": "#0d9eb0",
+  "background_color": "#ffffff"
+}

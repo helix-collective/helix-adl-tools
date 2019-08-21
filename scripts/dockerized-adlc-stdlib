@@ -1,0 +1,17 @@
+#!/bin/bash
+# Print the paths to the adl standard library (inside the container)
+
+IMAGE=helixta/hxadl
+VERSION=0.18
+
+ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." >/dev/null && pwd )"
+docker run \
+  --interactive \
+  --rm \
+  --volume $ROOT:$ROOT \
+  --volume /etc/passwd:/etc/passwd \
+  --volume /etc/group:/etc/group \
+  --user $(id -u):$(id -g) \
+  --workdir $(pwd) \
+  $IMAGE:$VERSION \
+  find /opt/lib/adl -name '*.adl'

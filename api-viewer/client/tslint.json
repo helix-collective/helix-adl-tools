@@ -1,0 +1,78 @@
+{
+  "extends": [
+    // Default to all rules - add exclusions in `rules` stanza
+    "tslint:all"
+  ],
+  "linterOptions": {
+    "exclude": [
+      // Generated code
+      "src/adl-gen/**",
+
+      // JS files
+      "**/*.js"
+    ]
+  },
+  "rules": {
+    // Configuration of rules
+    "no-unused-variable": [true, {"ignore-pattern": "^_"}],
+
+    // Decided to not have
+    "array-type": false,
+    "arrow-return-shorthand": false,
+    "comment-format": false,
+    "completed-docs": false,
+    "file-name-casing": false,
+    "interface-name": false,
+    "max-classes-per-file": false,
+    "member-access": false,
+    "member-ordering": false,
+    "newline-before-return": false,
+    "newline-per-chained-call": false,
+    "no-parameter-properties": false,
+    "no-inferrable-types": false,
+    "no-magic-numbers": false,
+    "no-null-keyword": false,
+    "no-void-expression": false,
+    "object-literal-sort-keys": false,
+    "only-arrow-functions": false,
+    "prefer-function-over-method": false,
+    "prefer-switch": false,
+    "prefer-template": false,
+    "promise-function-async": false,
+    "strict-boolean-expressions": false,
+    "typedef": false,
+    "variable-name": false,
+
+    // TODO(ray/timd): Remove these rules, check for adherence, and fix code
+    // or add to ignore list
+    "await-promise": false,
+    "binary-expression-operand-order": false,
+    "match-default-export-name": false,
+    "max-line-length": false,
+    "no-any": false,
+    "no-consecutive-blank-lines": false,
+    "no-console": false,
+    "no-empty-interface": false,
+    "no-floating-promises": false,
+    "no-implicit-dependencies": false,
+    "no-inferred-empty-object-type": false,
+    "no-non-null-assertion": false,
+    "no-parameter-reassignment": false,
+    "no-redundant-jsdoc": false,
+    "no-shadowed-variable": false,
+    "no-submodule-imports": false,
+    "no-unbound-method": false,
+    "no-use-before-declare": false,
+    "restrict-plus-operands": false,
+    "strict-type-predicates": false,
+    "switch-default": false,
+    "triple-equals": false,
+    "type-literal-delimiter": false,
+
+    // TODO(ray): These are required to `require` CSS
+    // Fix this via: https://medium.com/@sapegin/css-modules-with-typescript-and-webpack-6b221ebe5f10
+    "no-var-requires": false,
+    "no-require-imports": false,
+    "no-unsafe-any": false
+  }
+}

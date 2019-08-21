@@ -1,0 +1,12 @@
+{
+    "files.associations": {
+        "*.adl": "cpp",
+    },
+    "tslint.enable": true,
+    "files.autoSave": "afterDelay",
+    "editor.formatOnSave": true,
+    "css.validate": false,
+    "stylelint.enable": true,
+    "typescript.updateImportsOnFileMove.enabled": "always",
+    "editor.tabSize": 2
+}

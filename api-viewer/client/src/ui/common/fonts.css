@@ -1,0 +1,307 @@
+@value gridBaseline, desktopBreakpoint, mobileBreakpoint from "./metrics.css";
+@value smBreak,mdBreak,lgBreak from "./metrics.css";
+@value colorTextDefault, colorRedEnergy100, colorElectricNeon100 from "./colors.css";
+
+/**
+ * The following properties are expected here:
+ *  - font-size
+ *  - font-weight
+ *  - font-family
+ *  - letter-spacing
+ *  - line-height
+ *
+ * The following properties should NOT go here:
+ *  - alignment
+ *  - margin, padding, border
+ *  - display
+ *  - color
+ *  - text-transform (eg, uppercase)
+ */
+
+/* NOTE: `rem`s are based off a base font size, e.g. 2.4rem for a 10px base -> 24px */
+
+/** Weights */
+@value fontWeightRegular: regular;
+@value fontWeightBold: bold;
+
+@value bodyFontSize: 14px;
+
+
+@font-face {
+    font-family: 'Open SansRegular';
+    src:  url('./fonts/opensans-regular.woff2') format('woff2'),
+          url('./fonts/opensans-regular.woff') format('woff'),
+          url('./fonts/opensans-regular.ttf') format('truetype');
+    font-weight: 400;
+    font-style: normal;
+}
+
+@font-face {
+    font-family: 'Open SansBold';
+    src:  url('./fonts/opensans-bold.woff2') format('woff2'),
+          url('./fonts/opensans-bold.woff') format('woff'),
+          url('./fonts/opensans-bold.ttf') format('truetype');
+    font-weight: 400;
+    font-style: normal;
+}
+
+
+.fontStackRegular {
+  font-family: "Open SansRegular";
+}
+
+.fontStackBold {
+  font-family: "Open SansBold";
+}
+
+
+/** Define the base font stack and style */
+
+html > body,
+select {
+  font-family: "Open SansRegular";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-smooth: always;
+  font-size: bodyFontSize;
+  line-height: 1.875;
+  color: colorTextDefault;
+}
+
+strong {
+  font-family: "Open SansBold";
+}
+
+p, ol, li {
+  margin-bottom: 1em;
+}
+
+.emphasized {
+  font-family: "Open SansBold";
+}
+
+a {
+  text-decoration: none;
+  /* color: inherit; */
+  cursor: pointer;
+}
+
+a:active {
+  text-decoration: none;
+}
+
+a:visited {
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+h1, h2, h3, h4, h5 {
+  /*margin-bottom: 1em;*/
+}
+
+h2 {
+  margin-top: 1em;
+  margin-bottom: 0.3em;
+}
+
+h1 {
+  font-family: "Open SansRegular";
+}
+
+h2, h3, h4, h5 {
+  font-family: "Open SansBold";
+}
+
+h1 {
+  font-size: 24px;
+  line-height: 1.75;
+  letter-spacing: -0.5px;
+}
+
+h2 {
+  font-size: 20px;
+  line-height: 1.75;
+  letter-spacing: -0.5px;
+}
+
+h3 {
+  font-size: 18px;
+  line-height: 1.89;
+}
+
+h4 {
+  font-size: 16px;
+  line-height: 1.875;
+}
+
+h5 {
+  font-size: 16px;
+  line-height: 1.875;
+}
+
+@media(min-width: smBreak){
+
+  h1 {
+    font-size: 28px;
+    line-height: 1.61;
+  }
+
+
+  h2 {
+    font-size: 22px;
+    line-height: 1.82;
+  }
+
+  h3 {
+    font-size: 18px;
+    line-height: 1.94;
+  }
+
+  h4 {
+    font-size: 16px;
+    line-height: 1.875;
+  }
+
+  h5 {
+    font-size: 16px;
+    line-height: 1.875;
+  }
+
+}
+
+.errorMessage {
+  font-size: 14px;
+  line-height: 1.43;
+  color: colorRedEnergy100;
+}
+
+.disclaimer {
+  font-size: 14px;
+  line-height: 1.71;
+}
+
+button, .button {
+  font-family: "Open SansRegular";
+  font-size: 16px;
+  line-height: 1.56;
+}
+
+
+
+/** End styles from UI Design */
+
+
+
+ /* Old font styles */
+
+@value defaultFontStack: 'Open Sans', sans-serif;
+
+@value defaultLineHeight: 1.5;
+
+/* Weights should be kept in sync with the font import import (occurs in root css) */
+@value fontWeightLight: 300;
+@value fontWeightRegular: 400;
+@value fontWeightSemiBold: 600;
+
+/* `rem`s are based off a base font size, e.g. 2.4rem for a 10px base -> 24px */
+@value fontSizeHeading: 3.2rem;
+@value fontSizeTitle: 2.4rem;
+@value fontSizeSubTitle: 2.0rem;
+@value fontSizeNormal: 1.6rem;
+@value fontSizeSmall: 1.2rem;
+
+.fontSmoothing {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-smooth: always;
+}
+
+/**
+ * Applies default styling to an element's placeholder
+ * NOTE: Cannot compose because `compose` does not mixin.
+ * See: https://github.com/css-modules/css-modules/issues/42
+ */
+.withDefaultPlaceholder::placeholder {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-smooth: always;
+
+  font-family: defaultFontStack;
+  font-weight: fontWeightRegular;
+  font-size: fontSizeNormal;
+  letter-spacing: 0;
+  line-height: defaultLineHeight;
+}
+
+.textHeading {
+  composes: fontSmoothing;
+
+  font-family: defaultFontStack;
+  font-weight: fontWeightRegular;
+  font-size: fontSizeHeading;
+  letter-spacing: 0;
+  line-height: defaultLineHeight;
+}
+
+.textTitle {
+  composes: fontSmoothing;
+
+  font-family: defaultFontStack;
+  font-weight: fontWeightRegular;
+  font-size: fontSizeTitle;
+  letter-spacing: 0;
+  line-height: defaultLineHeight;
+}
+
+.textSubTitle {
+  composes: fontSmoothing;
+
+  font-family: defaultFontStack;
+  font-weight: fontWeightSemiBold;
+  font-size: fontSizeSubTitle;
+  letter-spacing: 0;
+  line-height: defaultLineHeight;
+}
+
+.textParagraph {
+  composes: fontSmoothing;
+
+  font-family: defaultFontStack;
+  font-weight: fontWeightRegular;
+  font-size: fontSizeNormal;
+  letter-spacing: 0;
+  line-height: defaultLineHeight;
+}
+
+.textEmphasizedParagraph {
+  composes: fontSmoothing;
+
+  font-family: defaultFontStack;
+  font-weight: fontWeightSemiBold;
+  font-size: fontSizeNormal;
+  letter-spacing: 0;
+  line-height: defaultLineHeight;
+}
+
+.textSmallHeading {
+  composes: fontSmoothing;
+
+  font-family: defaultFontStack;
+  font-weight: fontWeightSemiBold;
+  font-size: fontSizeSmall;
+  letter-spacing: 0;
+  line-height: defaultLineHeight;
+}
+
+.textSmallParagraph {
+  composes: fontSmoothing;
+
+  font-family: defaultFontStack;
+  font-weight: fontWeightLight;
+  font-size: fontSizeSmall;
+  letter-spacing: 0;
+  line-height: defaultLineHeight;
+}

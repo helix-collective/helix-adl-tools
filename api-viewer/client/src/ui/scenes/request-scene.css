@@ -1,0 +1,16 @@
+.responsetable {
+  margin: 10px 10px 0px 0px;
+
+  border: 1px solid black;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.responsetable th {
+  border-bottom: 1px solid black;
+  padding: 5px;
+}
+
+.responsetable td {
+  padding: 5px;
+}

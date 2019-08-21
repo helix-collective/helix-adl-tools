@@ -1,0 +1,30 @@
+/** Standard multiple for sizes and spacings */
+@value gridBaseline: 8px;
+/** Standard border radius */
+@value borderRadius: 5px;
+
+/** Breakpoints : Mobile first use `@media (min-width: smBreak)` */
+@value smBreak: 600px;
+@value mdBreak: 1024px;
+@value lgBreak: 1440px;
+@value xlBreak: 1920px;
+
+
+/* Legacy styles */
+/** Transition breakpoint from mobile to tablet */
+@value mobileBreakpoint: 768px;
+/** Transition breakpoint from tablet to average desktop */
+@value averageDesktopBreakpoint: 1024px;
+/** Transition breakpoint from average to large desktop */
+@value largeDesktopBreakpoint: 1440px;
+
+
+/** New Variables for UI Uplift Project */
+
+@value unit: 5px;
+@value offset: 10px;
+
+
+/** Grid Column width calculations */
+@value xsCol: 100% / 4;
+@value smCol: 100% / 12;

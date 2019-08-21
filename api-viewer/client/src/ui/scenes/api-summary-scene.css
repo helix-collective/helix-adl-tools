@@ -1,0 +1,17 @@
+.requestblock {
+  margin-bottom: 10px;
+}
+
+.requestblockdescription p {
+  clear: both;
+  margin: 0px;
+}
+
+.requestlink {
+  float: left;
+}
+
+.requestattributes {
+  float: right;
+  margin-right: 100px;
+}

@@ -1,0 +1,106 @@
+.contentcontainer {
+  margin: 40px;
+}
+
+.menuwrapper {
+  display: inline-block;
+  width: 180px;
+  margin: 0 10px 0 0;
+  height: 20px;
+  position: relative;
+}
+
+.menuparent {
+  height: 100%;
+  width: 100%;
+  display: block;
+  cursor: pointer;
+  line-height: 30px;
+  height: 30px;
+  border-radius: 5px;
+  background: #F9F9F9;
+  border: 1px solid #AAA;
+  border-bottom: 1px solid #777;
+  color: #282D31;
+  font-weight: bold;
+  z-index: 2;
+  position: relative;
+  -webkit-transition: border-radius .1s linear, background .1s linear, z-index 0s linear;
+  -webkit-transition-delay: .8s;
+  text-align: center;
+}
+
+.menuparent:hover,
+.menucontent:hover ~ .menuparent {
+  background: #fff;
+  -webkit-transition-delay: 0s, 0s, 0s;
+}
+
+.menucontent:hover ~ .menuparent {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  z-index: 0;
+}
+
+.menucontent {
+  position: absolute;
+  top: 0;
+  display: block;
+  z-index: 1;
+  height: 0;
+  width: 180px;
+  padding-top: 30px;
+  -webkit-transition: height .5s ease;
+  -webkit-transition-delay: .4s;
+  border: 1px solid #777;
+  border-radius: 5px;
+  box-shadow: 0 1px 2px rgba(0,0,0,.4);
+}
+
+.menuwrapper:active .menucontent {
+  height: 175px;
+  z-index: 3;
+  -webkit-transition-delay: 0s;
+}
+
+.menucontent:hover {
+  height: 175px;
+  z-index: 3;
+  -webkit-transition-delay: 0s;
+}
+
+
+.menucontent ul {
+  background: #fff;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  height: 100%;
+  border-bottom-left-radius: 5px;
+  border-bottom-right-radius: 5px;
+}
+
+.menucontent ul a {
+  text-decoration: none;
+}
+
+.menucontent li:hover {
+  background: #eee;
+  color: #333;
+}
+
+.menucontent li {
+  list-style: none;
+  text-align: left;
+  color: #888;
+  font-size: 14px;
+  line-height: 30px;
+  height: 30px;
+  padding-left: 10px;
+  border-top: 1px solid #ccc;
+}
+
+.menucontent li:last-of-type {
+  border-bottom-left-radius: 5px;
+  border-bottom-right-radius: 5px;
+}
