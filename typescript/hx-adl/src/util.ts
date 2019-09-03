@@ -10,6 +10,7 @@ import { promisify } from "util";
 type AdlModuleMap = {[key:string]:adlast.Module};
 
 export interface LoadedAdl {
+  allAdlDecls: { [key: string]: adlast.ScopedDecl },
   modules: AdlModuleMap,
   resolver: adl.DeclResolver
 };
@@ -50,17 +51,17 @@ export async function parseAdl(adlFiles: string[], adlSearchPath: string[]): Pro
   resolveRelativeModuleRefs(modules);
 
   // Build the resolver
-  const astMap = {};
+  const allAdlDecls = {};
   forEachDecl(modules, scopedDecl => {
-    astMap[scopedDecl.moduleName+"."+scopedDecl.decl.name] = scopedDecl;
+    allAdlDecls[scopedDecl.moduleName+"."+scopedDecl.decl.name] = scopedDecl;
   });
-  const resolver : adl.DeclResolver = adl.declResolver(astMap);
+  const resolver : adl.DeclResolver = adl.declResolver(allAdlDecls);
 
   // Cleanup
   await unlinkP(outfile);
   workdir.removeCallback();
 
-  return {modules, resolver};
+  return {allAdlDecls, modules, resolver};
 }
 
 const execFileP = promisify(execFile);
