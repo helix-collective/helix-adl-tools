@@ -37,17 +37,112 @@ export interface Params {
   outfile: string;
 };
 
+type DbTableBasic = {
+  scopedDecl: adlast.ScopedDecl;
+  struct: adlast.DeclType_Struct_;
+  ann:{}|null;
+  name:string;
+};
+
+type DbField = {
+  fieldOrderNumber: number;
+  tableName: string;
+  columnName: string;
+  columnType: ColumnType;
+  references?: DbField;         // foreign key reference graph represented as js object reference graph
+  typeExpr: adlast.TypeExpr;
+};
+
+type DbTableWithIdPrimaryKey = {
+  kind: "withIdPrimaryKey"
+};
+type DbTableWithPrimaryKey = {
+  kind: "withPrimaryKey",
+  withPrimaryKey: string[]    // single column name or composite key of column names
+};
+type DbTableNoPrimaryKey = {
+  kind: "withNoPrimaryKey";   // some tables may have no PK.
+};
+
+type DbTablePrimaryKey = DbTableWithIdPrimaryKey | DbTableWithPrimaryKey | DbTableNoPrimaryKey;
+
+type DbTable = DbTableBasic & {
+  primaryKey: DbTablePrimaryKey;
+  indexes: string[][];
+  uniquenessConstraints: string[][];
+  extraSql: string[];
+
+  fieldsMap: {
+    [columnName: string] : DbField
+  }
+};
+
+function makeDbTable(resolver: adl.DeclResolver, t: DbTableBasic) : DbTable {
+
+  const noPrimaryKey : DbTableNoPrimaryKey = {
+    kind: "withNoPrimaryKey"
+  };
+  const withIdPrimaryKey : DbTableWithIdPrimaryKey|undefined = t.ann && t.ann['withIdPrimaryKey'] ? {
+    kind: "withIdPrimaryKey"
+  } : undefined;
+  const withPrimaryKey : DbTableWithPrimaryKey|undefined = t.ann && t.ann['withPrimaryKey'] ? {
+    kind: "withPrimaryKey",
+    withPrimaryKey: t.ann && t.ann['withPrimaryKey']
+  } : undefined;
+  const primaryKey : DbTablePrimaryKey = withPrimaryKey || withIdPrimaryKey || noPrimaryKey;
+
+  const indexes: string[][] = t.ann && t.ann['indexes'] || [];
+  const uniquenessConstraints: string[][] = t.ann && t.ann['uniquenessConstraints'] || [];
+  const extraSql: string[] = t.ann && t.ann['extraSql'] || [];
+
+  // TODO: ensure withPrimaryKey columns exist
+
+  const fieldsMap : {
+    [columnName: string] : DbField
+  } = {};
+
+  let fieldOrderNumber = 0;
+  for(const f of t.struct.value.fields) {
+    const columnName = getColumnName(f);
+    const columnType = getColumnType(resolver, f.typeExpr);
+
+    const dbf: DbField = {
+      fieldOrderNumber,
+      columnName,
+      columnType,
+      tableName: t.name,
+      typeExpr: f.typeExpr,
+    };
+
+    fieldsMap[columnName] = dbf;
+    fieldOrderNumber += 1
+  }
+
+  return {
+    ...t,
+    primaryKey,
+    indexes,
+    uniquenessConstraints,
+    extraSql,
+    fieldsMap
+  };
+}
+
+/// Return the values in the map sorted by a key
+function mapValuesSortedBy<Obj, K extends keyof Obj>(map : { [key:string] : Obj}, k : K) : Obj[] {
+  const vals = Object.values(map);
+  vals.sort((a, b) => a[k] < b[k] ? -1 : a[k] > b[k] ? 1 : 0);
+  return vals;
+}
+
 export async function generateSqlSchema(params: Params): Promise<void> {
   // Load the ADL based upon command line arguments
   const loadedAdl = await parseAdl(params.adlFiles, params.adlSearchPath);
 
   // Find all of the struct declarations that have a DbTable annotation
-  const dbTables: {
-    scopedDecl: adlast.ScopedDecl,
-    struct: adlast.DeclType_Struct_,
-    ann:{}|null,
-    name:string
-  }[]  = [];
+  const dbTablesMap : {
+    [tablename:string] : DbTable
+  } = {};
 
   forEachDecl(loadedAdl.modules, scopedDecl => {
     if (scopedDecl.decl.type_.kind == 'struct_') {
@@ -55,11 +150,43 @@ export async function generateSqlSchema(params: Params): Promise<void> {
       const ann = getAnnotation(scopedDecl.decl.annotations, DB_TABLE);
       if (ann != undefined) {
         const name = getTableName(scopedDecl);
-        dbTables.push({scopedDecl, struct, ann, name});
+        dbTablesMap[name] = makeDbTable(loadedAdl.resolver, {scopedDecl, struct, ann, name});
       }
     }
   });
-  dbTables.sort( (t1, t2) => t1.name < t2.name ? -1 : t1.name > t2.name ? 1 : 0);
+
+  // link dbTables:
+  console.log('Linking dbTables');
+  for(const dbTable of Object.values(dbTablesMap)) {
+    console.log('Linking dbTables', dbTable.name);
+    for(const field of Object.values(dbTable.fieldsMap)) {
+      console.log('Linking dbTables', dbTable.name, field.columnName);
+      if(field.columnType.fkey) {
+        const referredTableName = field.columnType.fkey.table;
+        const referredTable : DbTable|undefined = dbTablesMap[referredTableName];
+
+        if(referredTable === undefined) {
+          throw new Error('Foreign key referene to non-existent table found:' + referredTableName)
+        }
+
+        let referredTablePkColumn = 'id';
+        if(referredTable.primaryKey.kind === 'withNoPrimaryKey') {
+          throw new Error("Unable to map DbKey to a table with no primary key");
+        }
+        if(referredTable.primaryKey.kind === 'withPrimaryKey') {
+          if(referredTable.primaryKey.withPrimaryKey.length === 1) {
+            referredTablePkColumn = referredTable.primaryKey.withPrimaryKey[0];
+          } else {
+            throw new Error("Unable to map one DbKey to a table with a composite primary key");
+          }
+        }
+
+        field.columnType.fkey.column = referredTablePkColumn;
+      }
+    }
+  }
+
+  const dbTables: DbTable[] = mapValuesSortedBy(dbTablesMap,"name");
 
   // Now generate the SQL file
   const writer = fs.createWriteStream(params.outfile);
@@ -74,19 +201,14 @@ export async function generateSqlSchema(params: Params): Promise<void> {
 
   // Output the tables
   for(const t of dbTables) {
-    const withIdPrimaryKey: boolean  = t.ann && t.ann['withIdPrimaryKey'] || false;
-    const withPrimaryKey: string[] = t.ann && t.ann['withPrimaryKey'] || [];
-    const indexes: string[][] = t.ann && t.ann['indexes'] || [];
-    const uniquenessConstraints: string[][] = t.ann && t.ann['uniquenessConstraints'] || [];
-    const extraSql: string[] = t.ann && t.ann['extraSql'] || [];
-
     const lines: {code:string, comment?:string}[] = [];
-    if (withIdPrimaryKey) {
+    if (t.primaryKey.kind === 'withIdPrimaryKey') {
       lines.push({code: 'id text not null'});
     }
-    for(const f of t.struct.value.fields) {
-      const columnName = getColumnName(f);
-      const columnType = getColumnType(loadedAdl.resolver, f.typeExpr);
+
+    for(const f of mapValuesSortedBy(t.fieldsMap,"fieldOrderNumber")) {
+      const columnName = f.columnName;
+      const columnType = f.columnType;
       lines.push({
         code: `${columnName} ${columnType.sqltype}`,
         comment: typeExprToStringUnscoped(f.typeExpr),
@@ -105,21 +227,29 @@ export async function generateSqlSchema(params: Params): Promise<void> {
       return s;
     }
 
-    for(let i = 0; i < indexes.length; i++) {
-      const cols = indexes[i].map(findColName);
+    for(let i = 0; i < t.indexes.length; i++) {
+      const cols = t.indexes[i].map(findColName);
       constraints.push(`create index ${t.name}_${i+1}_idx on ${t.name}(${cols.join(', ')});`);
     }
-    for(let i = 0; i < uniquenessConstraints.length; i++) {
-      const cols = uniquenessConstraints[i].map(findColName);
+    for(let i = 0; i < t.uniquenessConstraints.length; i++) {
+      const cols = t.uniquenessConstraints[i].map(findColName);
       constraints.push(`alter table ${t.name} add constraint ${t.name}_${i+1}_con unique (${cols.join(', ')});`);
     }
-    if (withIdPrimaryKey) {
+    if (t.primaryKey.kind === 'withIdPrimaryKey') {
       lines.push({code:'primary key(id)'});
-    } else if (withPrimaryKey.length > 0) {
-      const cols = withPrimaryKey.map(findColName);
+    } else if (t.primaryKey.kind === 'withPrimaryKey') {
+      const cols = t.primaryKey.withPrimaryKey.map(findColName);
       lines.push({code:`primary key(${cols.join(',')})`});
+    } else if (t.primaryKey.kind === 'withNoPrimaryKey') {
+      lines.push({code:'-- (no primary key)'});
+      throw new Error("No primary key table not supported");    // it needs to consume the preceding comma
+      /*
+      create table look_ma_no_primary_key(
+        name text not null,                  -- String        <-- superfluous comma not consumed here
+        -- (no primary key)
+      );
+      */
     }
-
 
     writer.write('\n');
     writer.write( `create table ${t.name}(\n` );
@@ -135,7 +265,7 @@ export async function generateSqlSchema(params: Params): Promise<void> {
       writer.write('  ' + line + '\n');
     }
     writer.write( `);\n` );
-    allExtraSql = allExtraSql.concat(extraSql);
+    allExtraSql = allExtraSql.concat(t.extraSql);
   }
 
   if(constraints.length > 0) {
@@ -182,7 +312,7 @@ interface ColumnType {
   sqltype: string;
   fkey? : {
     table: string,
-    column: string
+    column?: string
   };
 };
 
@@ -246,12 +376,12 @@ function getColumnType1(resolver: adl.DeclResolver, typeExpr: adlast.TypeExpr): 
   return "json";
 }
 
-function getForeignKeyRef(resolver: adl.DeclResolver, typeExpr: adlast.TypeExpr): {table:string, column:string} | undefined {
+function getForeignKeyRef(resolver: adl.DeclResolver, typeExpr: adlast.TypeExpr): {table:string} | undefined {
   const dtype = decodeTypeExpr(typeExpr);
   if (dtype.kind == 'Reference' && scopedNamesEqual(dtype.refScopedName, DB_KEY)) {
     const param0 = dtype.parameters[0];
     if (param0.kind == 'Reference') {
-      return {table:getTableName(resolver(param0.refScopedName)), column:"id"};
+      return { table:getTableName(resolver(param0.refScopedName)) };
     }
   }
   return undefined;
