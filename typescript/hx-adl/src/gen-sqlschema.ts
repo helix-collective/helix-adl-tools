@@ -1,10 +1,9 @@
 import * as adlast from './adl-gen/sys/adlast';
 import * as adl from "./adl-gen/runtime/adl";
-import { collect, scopedName, scopedNamesEqual, expandNewType, expandTypeAlias, parseAdl, forEachDecl, getAnnotation, decodeTypeExpr, DecodedTypeExpr } from "./util";
+import { collect, scopedName, scopedNamesEqual, expandTypes, expandNewType, expandTypeAlias, parseAdl, forEachDecl, getAnnotation, decodeTypeExpr, DecodedTypeExpr } from "./util";
 import * as fs from "fs";
 import { isEnum, typeExprToStringUnscoped } from './adl-gen/runtime/utils';
 import { Command } from "commander";
-import { snakeCase } from "change-case";
 
 export function configureCli(program: Command) {
   program
@@ -92,10 +91,10 @@ export async function generateSqlSchema(params: Params): Promise<void> {
     }
     for(const f of t.struct.value.fields) {
       const columnName = getColumnName(f);
-      const columnType = getColumnType(loadedAdl.resolver, f.typeExpr, params.dbProfile);
+      const columnType = getColumnType(loadedAdl.resolver, f, params.dbProfile);
       lines.push({
         code: `${columnName} ${columnType.sqltype}`,
-        comment: tweakTypeComment (typeExprToStringUnscoped(f.typeExpr)),
+        comment: typeExprToStringUnscoped(f.typeExpr),
       });
       if (columnType.fkey) {
         constraints.push(`alter table ${t.name} add constraint ${t.name}_${columnName}_fk foreign key (${columnName}) references ${columnType.fkey.table}(${columnType.fkey.column});`);
@@ -184,6 +183,20 @@ function getColumnName(field: adlast.Field): string {
   return snakeCase(field.name);
 }
 
+function snakeCase(camelCase: string): string {
+  if (!camelCase) {
+      return '';
+  }
+
+  var pascalCase = camelCase.charAt(0).toUpperCase() + camelCase.substr(1);
+  return pascalCase
+    .replace(/([a-z])([A-Z])/g, '$1_$2')
+    .replace(/([A-Z])([A-Z][a-z])/g, '$1_$2')
+    .replace(/([a-z])([0-9])/gi, '$1_$2')
+    .replace(/([0-9])([a-z])/gi, '$1_$2')
+    .toLowerCase();
+}
+
 interface ColumnType {
   sqltype: string;
   fkey? : {
@@ -193,21 +206,26 @@ interface ColumnType {
 };
 
 
-function getColumnType(resolver: adl.DeclResolver, typeExpr: adlast.TypeExpr, dbProfile: DbProfile): ColumnType {
+function getColumnType(resolver: adl.DeclResolver, field: adlast.Field,  dbProfile: DbProfile): ColumnType {
+  const ann = getAnnotation(field.annotations, DB_COLUMN_TYPE);
+  const annctype: string | undefined = typeof ann === "string" ? ann : undefined;
+  
+  const typeExpr = field.typeExpr;
+
   // For Maybe<T> and Nullable<T> the sql column will allow nulls
   const dtype = decodeTypeExpr(typeExpr);
   if(dtype.kind == 'Nullable' ||
      dtype.kind == 'Reference' && scopedNamesEqual(dtype.refScopedName, MAYBE)
     ) {
     return {
-      sqltype: getColumnType1(resolver, typeExpr.parameters[0], dbProfile),
+      sqltype: annctype || getColumnType1(resolver, typeExpr.parameters[0], dbProfile),
       fkey: getForeignKeyRef(resolver, typeExpr.parameters[0])
     };
   }
 
   // For all other types, the column will not allow nulls
   return {
-    sqltype: getColumnType1(resolver, typeExpr, dbProfile) + " not null",
+    sqltype: (annctype || getColumnType1(resolver, typeExpr, dbProfile)) + " not null",
     fkey: getForeignKeyRef(resolver, typeExpr)
   };
 }
@@ -224,6 +242,10 @@ function getColumnType1(resolver: adl.DeclResolver, typeExpr: adlast.TypeExpr, d
         return "date";
       } else if (scopedNamesEqual(dtype.refScopedName, LOCAL_DATETIME)) {
         return "timestamp";
+      } else if (scopedNamesEqual(dtype.refScopedName, GEOMETRY_WKT)) {
+        return "geometry";
+      } else if (scopedNamesEqual(dtype.refScopedName, GEOGRAPHY_GEO_JSON)) {
+        return "geography";
       } else if (sdecl.decl.type_.kind == 'union_' && isEnum(sdecl.decl.type_.value)) {
         return dbProfile.enumColumnType;
       }
@@ -240,7 +262,8 @@ function getColumnType1(resolver: adl.DeclResolver, typeExpr: adlast.TypeExpr, d
   }
 }
 
-function getForeignKeyRef(resolver: adl.DeclResolver, typeExpr: adlast.TypeExpr): {table:string, column:string} | undefined {
+function getForeignKeyRef(resolver: adl.DeclResolver, typeExpr0: adlast.TypeExpr): {table:string, column:string} | undefined {
+  const typeExpr = expandTypes(resolver, typeExpr0, {expandTypeAliases:true});
   const dtype = decodeTypeExpr(typeExpr);
   if (dtype.kind == 'Reference' && scopedNamesEqual(dtype.refScopedName, DB_KEY)) {
     const param0 = dtype.parameters[0];
@@ -251,13 +274,6 @@ function getForeignKeyRef(resolver: adl.DeclResolver, typeExpr: adlast.TypeExpr)
   return undefined;
 }
 
-
-// A few text changes to comments to make them consistent with the old generator
-function tweakTypeComment(comment: string): string {
-  return comment
-    .replace("DbKey", "common.db.DbKey")
-    .replace("Instant", "common.Instant");
-}
 
 // Contains customizations for the db mapping
 interface DbProfile {
@@ -314,8 +330,8 @@ const postgres2DbProfile: DbProfile = {
 
 
 const mssql2DbProfile: DbProfile = {
-  idColumnType: "nvchar(64)",
-  enumColumnType: "nvchar(64)",
+  idColumnType: "nvarchar(64)",
+  enumColumnType: "nvarchar(64)",
   primColumnType(ptype: string): string {
     switch (ptype) {
     case "String": return "nvarchar(max)";
@@ -341,8 +357,11 @@ const mssql2DbProfile: DbProfile = {
 const MAYBE = scopedName("sys.types", "Maybe");
 const DB_TABLE = scopedName("common.db", "DbTable");
 const DB_COLUMN_NAME = scopedName("common.db", "DbColumnName")
+const DB_COLUMN_TYPE = scopedName("common.db", "DbColumnType")
 const DB_KEY = scopedName("common.db", "DbKey")
 const INSTANT = scopedName("common", "Instant");
 const LOCAL_DATE = scopedName("common", "LocalDate");
 const LOCAL_DATETIME = scopedName("common", "LocalDateTime");
+const GEOMETRY_WKT = scopedName("common", "GeometryWKT");
+const GEOGRAPHY_GEO_JSON = scopedName("common", "GeographyGeoJson");
 
