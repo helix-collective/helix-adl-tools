@@ -4,6 +4,7 @@ import { collect, scopedName, scopedNamesEqual, expandTypes, expandNewType, expa
 import * as fs from "fs";
 import { isEnum, typeExprToStringUnscoped } from './adl-gen/runtime/utils';
 import { Command } from "commander";
+import { snakeCase } from "change-case";
 
 export function configureCli(program: Command) {
   program
@@ -181,20 +182,6 @@ function getColumnName(field: adlast.Field): string {
     return ann;
   }
   return snakeCase(field.name);
-}
-
-function snakeCase(camelCase: string): string {
-  if (!camelCase) {
-      return '';
-  }
-
-  var pascalCase = camelCase.charAt(0).toUpperCase() + camelCase.substr(1);
-  return pascalCase
-    .replace(/([a-z])([A-Z])/g, '$1_$2')
-    .replace(/([A-Z])([A-Z][a-z])/g, '$1_$2')
-    .replace(/([a-z])([0-9])/gi, '$1_$2')
-    .replace(/([0-9])([a-z])/gi, '$1_$2')
-    .toLowerCase();
 }
 
 interface ColumnType {
