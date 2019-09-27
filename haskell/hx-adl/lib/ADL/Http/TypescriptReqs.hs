@@ -22,7 +22,6 @@ import ADL.Compiler.Flags(Flags(..),parseArguments,standardOptions, addToMergeFi
 import ADL.Http.Utils(GetReq(..), PostReq(..), PutReq, RequestType(..), RequestDecl(..), getRequestDecl)
 import ADL.Utils.IndentedCode
 import ADL.Utils.Format(template,formatText)
-import Cases(snakify)
 import Control.Monad(when)
 import Control.Monad.Trans(liftIO)
 import Control.Monad.Trans.State.Strict

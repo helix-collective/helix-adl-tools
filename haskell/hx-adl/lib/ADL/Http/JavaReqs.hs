@@ -23,7 +23,6 @@ import ADL.Compiler.Flags(Flags(..),parseArguments,standardOptions, addToMergeFi
 import ADL.Utils.IndentedCode
 import ADL.Utils.Format(template,formatText)
 import ADL.Http.Utils(GetReq(..), PostReq(..), PutReq, RequestType(..), RequestDecl(..), getRequestDecl)
-import Cases(snakify)
 import Control.Monad(when)
 import Control.Monad.Trans(liftIO)
 import Control.Monad.Trans.State.Strict
@@ -36,6 +35,7 @@ import Data.Maybe(mapMaybe)
 import System.Directory(createDirectoryIfMissing)
 import System.FilePath(takeDirectory,(</>))
 import System.Console.GetOpt(OptDescr(..), ArgDescr(..))
+import Utils(toSnakeCase)
 
 data JavaReqFlags = JavaReqFlags {
   jt_rtpackage :: T.Text,
@@ -139,4 +139,4 @@ snHttpPath :: AST.ScopedName
 snHttpPath = AST.ScopedName (AST.ModuleName ["common","http"]) "Path"
 
 requestName :: T.Text -> T.Text
-requestName = T.toUpper . snakify
+requestName = T.toUpper . toSnakeCase

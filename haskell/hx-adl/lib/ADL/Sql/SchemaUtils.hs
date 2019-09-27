@@ -21,6 +21,7 @@ import qualified Data.Aeson as JS
 import qualified Data.HashMap.Strict as HM
 import qualified Data.Map as M
 import qualified Data.Text as T
+import qualified Data.Text.Lazy as TL
 import qualified Data.Vector as V
 import qualified Data.Semigroup as S
 
@@ -32,8 +33,8 @@ import ADL.Utils.Format
 import ADL.Sql.Schema hiding (PrimitiveType)
 import Data.List(intersperse, sort)
 import Data.Monoid
-import Cases(snakify)
 import Data.Maybe(mapMaybe)
+import Utils(toSnakeCase)
 
 type RTypeExpr = TypeExpr ResolvedType
 type RField = Field ResolvedType
@@ -339,7 +340,7 @@ isEnumeration2 _ = False
 
 ----------------------------------------------------------------------
 dbName :: T.Text -> T.Text
-dbName = snakify
+dbName = toSnakeCase
 
 getLiteralField :: JS.Value -> T.Text -> Maybe JS.Value
 getLiteralField (JS.Object map) field = HM.lookup field map

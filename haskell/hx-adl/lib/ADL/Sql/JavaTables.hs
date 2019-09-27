@@ -29,7 +29,6 @@ import ADL.Compiler.Utils(FileWriter,writeOutputFile)
 import ADL.Compiler.Flags(Flags(..),parseArguments,standardOptions, addToMergeFileExtensions)
 import ADL.Utils.IndentedCode
 import ADL.Utils.Format(template,formatText)
-import Cases(snakify)
 import Control.Monad(when)
 import Control.Monad.Trans(liftIO)
 import Control.Monad.Trans.State.Strict
@@ -42,6 +41,7 @@ import Data.Maybe(mapMaybe)
 import System.Directory(createDirectoryIfMissing)
 import System.FilePath(takeDirectory,(</>))
 import System.Console.GetOpt(OptDescr(..), ArgDescr(..))
+import Utils(toSnakeCase)
 
 data JavaTableFlags = JavaTableFlags {
   jt_rtpackage :: T.Text,
@@ -106,7 +106,7 @@ generateJavaModel jtflags cgp javaPackageFn mod (decl,struct,table,dbTableAnnota
   where
     state0 = J.classFile cgp (AST.m_name mod) javaPackageFn classDecl
     tableClassNameT = tableClassName decl
-    tableInstanceNameT = T.toUpper (snakify (AST.d_name decl))
+    tableInstanceNameT = T.toUpper (toSnakeCase (AST.d_name decl))
     classDecl = "@SuppressWarnings(\"all\")\npublic class " <> tableClassNameT <> " extends Table"
     javaClassNameT = javaClassName decl
     dbTableNameT = dbTableName decl
@@ -449,7 +449,7 @@ withCommas [l] = [(l," ")]
 withCommas (l:ls) = (l,","):withCommas ls
 
 dbName :: T.Text -> T.Text
-dbName = snakify
+dbName =  toSnakeCase
 
 getAnnotation :: AST.Annotations J.CResolvedType -> AST.ScopedName -> Maybe JS.Value
 getAnnotation annotations annotationName = snd <$> M.lookup annotationName annotations

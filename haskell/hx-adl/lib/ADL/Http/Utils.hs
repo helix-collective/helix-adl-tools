@@ -6,7 +6,6 @@ import qualified Data.Text as T
 import qualified ADL.Compiler.AST as AST
 
 import ADL.Compiler.Processing(ResolvedTypeT(..), expandTypedefs)
-import Cases(snakify)
 
 data GetReq r = GetReq {
   gr_resp :: AST.TypeExpr r
