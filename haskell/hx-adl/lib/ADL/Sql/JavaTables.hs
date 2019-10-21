@@ -214,7 +214,7 @@ generateJavaModel jtflags cgp javaPackageFn mod (decl,struct,table,dbTableAnnota
         (IdColumn col) -> return ("value.getId()")
 
       J.addMethod
-        ( cblock (template "public Map<? extends FieldRef, ? extends Object> dbMapping($1 value)" [javaClassNameT])
+        ( cblock (template "public Map<FieldRef, Object> dbMapping($1 value)" [javaClassNameT])
           (  cline "return Mapx.m("
           <> indent (mconcat [ctemplate "Mapx.e($1(), $2)$3" [javaFieldName dbc, getter, mcomma] | ((dbc,getter),mcomma) <- withCommas (zip dbColumns getters)])
           <> cline ");"
@@ -243,7 +243,7 @@ generateJavaModel jtflags cgp javaPackageFn mod (decl,struct,table,dbTableAnnota
           dbFromAdlExpr col field (template "value.get$1()" [J.javaCapsFieldName field])
 
       J.addMethod
-        ( cblock (template "public Map<? extends FieldRef, ? extends Object> dbMapping($1<$2> id, $2 value)" [dbKeyI,javaClassNameT])
+        ( cblock (template "public Map<FieldRef, Object> dbMapping($1<$2> id, $2 value)" [dbKeyI,javaClassNameT])
           (  cline "return Mapx.m("
           <> indent (cline "Mapx.e(id(), id.getValue()),")
           <> indent (mconcat [ctemplate "Mapx.e($1(), $2)$3" [javaFieldName dbc, getter, mcomma] | (((dbc,_,_),getter),mcomma) <- withCommas (zip fields getters)])
