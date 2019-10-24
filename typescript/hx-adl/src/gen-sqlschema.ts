@@ -15,9 +15,11 @@ export function configureCli(program: Command) {
    .option('--postgres', 'Generate sql for postgres')
    .option('--postgres-v2', 'Generate sql for postgres (model version 2)')
    .option('--mssql', 'Generate sql for microsoft sqlserver')
+   .option('--extension <ext>', 'Add to included sql extensions', collect, [])
    .description('Generate a db schema from ADL files')
    .action( (adlFiles:string[], cmd:{}) => {
      const adlSearchPath: string[] = cmd['searchdir'];
+     const extensions: string[] = cmd['extension'];
 
      let outfile: string = cmd['outfile'];
      if (cmd['outputdir']) {
@@ -32,7 +34,7 @@ export function configureCli(program: Command) {
        dbProfile = mssql2DbProfile;
      }
 
-     generateSqlSchema({adlFiles, adlSearchPath, outfile, dbProfile});
+     generateSqlSchema({adlFiles, adlSearchPath, outfile, extensions, dbProfile});
    });
 }
 
@@ -40,6 +42,7 @@ export interface Params {
   adlFiles: string[];
   adlSearchPath: string[];
   outfile: string;
+  extensions: string[];
   dbProfile: DbProfile;
 };
 
@@ -74,6 +77,12 @@ export async function generateSqlSchema(params: Params): Promise<void> {
   writer.write( `--\n` );
   writer.write( `-- column comments show original ADL types\n` );
 
+  if (params.extensions.length > 0) {
+    writer.write('\n');
+    params.extensions.forEach( e => {
+      writer.write( `create extension ${e};\n` );
+    });
+  }
 
   const constraints: string[] = [];
   let allExtraSql: string[] = [];
@@ -98,7 +107,7 @@ export async function generateSqlSchema(params: Params): Promise<void> {
         comment: typeExprToStringUnscoped(f.typeExpr),
       });
       if (columnType.fkey) {
-        constraints.push(`alter table ${t.name} add constraint ${t.name}_${columnName}_fk foreign key (${columnName}) references ${columnType.fkey.table}(${columnType.fkey.column});`);
+        constraints.push(`alter table ${t.name} add constraint ${t.name}_${columnName}_fk foreign key (${columnName}) references ${quoteReservedName(columnType.fkey.table)}(${columnType.fkey.column});`);
       }
     }
 
@@ -113,11 +122,11 @@ export async function generateSqlSchema(params: Params): Promise<void> {
 
     for(let i = 0; i < indexes.length; i++) {
       const cols = indexes[i].map(findColName);
-      constraints.push(`create index ${t.name}_${i+1}_idx on ${t.name}(${cols.join(', ')});`);
+      constraints.push(`create index ${t.name}_${i+1}_idx on ${quoteReservedName(t.name)}(${cols.join(', ')});`);
     }
     for(let i = 0; i < uniquenessConstraints.length; i++) {
       const cols = uniquenessConstraints[i].map(findColName);
-      constraints.push(`alter table ${t.name} add constraint ${t.name}_${i+1}_con unique (${cols.join(', ')});`);
+      constraints.push(`alter table ${quoteReservedName(t.name)} add constraint ${t.name}_${i+1}_con unique (${cols.join(', ')});`);
     }
     if (withIdPrimaryKey) {
       lines.push({code:'primary key(id)'});
@@ -128,7 +137,7 @@ export async function generateSqlSchema(params: Params): Promise<void> {
 
 
     writer.write('\n');
-    writer.write( `create table ${t.name}(\n` );
+    writer.write( `create table ${quoteReservedName(t.name)}(\n` );
     for(let i = 0; i < lines.length; i++) {
       let line = lines[i].code;
       if (i < lines.length-1) {
@@ -174,6 +183,21 @@ function getTableName(scopedDecl: adlast.ScopedDecl): string {
 }
 
 /**
+ *  Returns the singular primary key for the table
+ */
+function getPrimaryKey(scopedDecl: adlast.ScopedDecl): string {
+  const ann = getAnnotation(scopedDecl.decl.annotations, DB_TABLE);
+  if (ann && ann['withIdPrimaryKey']) {
+    return "id";
+  }
+  if (ann && ann["withPrimaryKey"] && ann["withPrimaryKey"].length == 1) {
+    return ann["withPrimaryKey"][0];
+  }
+  throw new Error(`No singular primary key for ${scopedDecl.decl.name}`);
+  return "??";
+}
+
+/**
  * Returns the SQL name for a column corresponding to a field
  */
 function getColumnName(field: adlast.Field): string {
@@ -183,6 +207,21 @@ function getColumnName(field: adlast.Field): string {
   }
   return snakeCase(field.name);
 }
+
+const RESERVED_NAMES : {[name:string] : boolean} = {};
+[
+  // TODO: Add other names here
+  "user",
+].forEach( n => {RESERVED_NAMES[n] = true;});
+
+function quoteReservedName(s:string) {
+  if (RESERVED_NAMES[s]) {
+    return `"${s}"`;
+  } else {
+    return s;
+  }
+}
+
 
 interface ColumnType {
   sqltype: string;
@@ -255,7 +294,8 @@ function getForeignKeyRef(resolver: adl.DeclResolver, typeExpr0: adlast.TypeExpr
   if (dtype.kind == 'Reference' && scopedNamesEqual(dtype.refScopedName, DB_KEY)) {
     const param0 = dtype.parameters[0];
     if (param0.kind == 'Reference') {
-      return {table:getTableName(resolver(param0.refScopedName)), column:"id"};
+      const decl = resolver(param0.refScopedName);
+      return {table:getTableName(decl), column:getPrimaryKey(decl)};
     }
   }
   return undefined;
