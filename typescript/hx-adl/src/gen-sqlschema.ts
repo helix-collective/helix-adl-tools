@@ -157,7 +157,7 @@ export async function generateSqlSchema(params: Params): Promise<void> {
   }
 
   // And any sql
-  for(const sql in allExtraSql) {
+  for(const sql of allExtraSql) {
     writer.write(sql + '\n');
   }
 }
