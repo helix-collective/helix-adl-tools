@@ -17,7 +17,6 @@ import qualified Data.Text.Encoding as T
 import qualified Data.Vector as V
 import qualified ADL.Compiler.AST as AST
 import qualified ADL.Compiler.Backends.Java.Internal as J
-import qualified ADL.Compiler.Backends.Java.Json as J
 import qualified ADL.Compiler.Backends.Java as J
 import qualified ADL.Sql.SchemaUtils as SC
 import qualified ADL.Sql.Schema as SC
