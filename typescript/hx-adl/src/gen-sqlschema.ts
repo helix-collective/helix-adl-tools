@@ -1,6 +1,7 @@
 import * as adlast from './adl-gen/sys/adlast';
 import * as adl from "./adl-gen/runtime/adl";
-import { collect, scopedName, scopedNamesEqual, expandTypes, expandNewType, expandTypeAlias, parseAdl, forEachDecl, getAnnotation, decodeTypeExpr, DecodedTypeExpr } from "./util";
+import { createJsonBinding } from "./adl-gen/runtime/json";
+import { collect, scopedName, scopedNamesEqual, expandTypes, expandNewType, expandTypeAlias, parseAdl, forEachDecl, getAnnotation, decodeTypeExpr, DecodedTypeExpr, LoadedAdl } from "./util";
 import * as fs from "fs";
 import { isEnum, typeExprToStringUnscoped } from './adl-gen/runtime/utils';
 import { Command } from "commander";
@@ -12,6 +13,7 @@ export function configureCli(program: Command) {
    .option('-I, --searchdir <path>', 'Add to adl searchpath', collect, [])
    .option('--outfile <path>', 'the resulting sql file', 'create.sql')
    .option('--outputdir <dir>', 'the directory into which the sql is written (deprecated)')
+   .option('--outmetadata <path>', 'sql to insert the model metadata')
    .option('--postgres', 'Generate sql for postgres')
    .option('--postgres-v2', 'Generate sql for postgres (model version 2)')
    .option('--mssql', 'Generate sql for microsoft sqlserver')
@@ -26,6 +28,8 @@ export function configureCli(program: Command) {
        outfile = cmd['outputdir'] + '/create.sql';
      }
 
+     let outmetadata: string | null = cmd['outmetadata'] || null;
+
      let dbProfile = postgresDbProfile;
      if (cmd['postgresV2']) {
        dbProfile = postgres2DbProfile;
@@ -34,7 +38,7 @@ export function configureCli(program: Command) {
        dbProfile = mssql2DbProfile;
      }
 
-     generateSqlSchema({adlFiles, adlSearchPath, outfile, extensions, dbProfile});
+     generateSql({adlFiles, adlSearchPath, outfile, outmetadata, extensions, dbProfile});
    });
 }
 
@@ -42,21 +46,24 @@ export interface Params {
   adlFiles: string[];
   adlSearchPath: string[];
   outfile: string;
+  outmetadata: string | null;
   extensions: string[];
   dbProfile: DbProfile;
 };
 
-export async function generateSqlSchema(params: Params): Promise<void> {
+export interface DbTable {
+  scopedDecl: adlast.ScopedDecl;
+  struct: adlast.DeclType_Struct_;
+  ann: {}|null;
+  name: string;
+};
+
+export async function generateSql(params: Params): Promise<void> {
   // Load the ADL based upon command line arguments
   const loadedAdl = await parseAdl(params.adlFiles, params.adlSearchPath);
 
   // Find all of the struct declarations that have a DbTable annotation
-  const dbTables: {
-    scopedDecl: adlast.ScopedDecl,
-    struct: adlast.DeclType_Struct_,
-    ann:{}|null,
-    name:string
-  }[]  = [];
+  const dbTables: DbTable[]  = [];
 
   forEachDecl(loadedAdl.modules, scopedDecl => {
     if (scopedDecl.decl.type_.kind == 'struct_') {
@@ -69,7 +76,13 @@ export async function generateSqlSchema(params: Params): Promise<void> {
     }
   });
   dbTables.sort( (t1, t2) => t1.name < t2.name ? -1 : t1.name > t2.name ? 1 : 0);
+  await generateSqlSchema(params, loadedAdl, dbTables);
+  if (params.outmetadata !== null) {
+    await generateMetadata(params.outmetadata, params, loadedAdl, dbTables);
+  }
+}
 
+async function generateSqlSchema(params: Params, loadedAdl: LoadedAdl, dbTables: DbTable[]): Promise<void> {
   // Now generate the SQL file
   const writer = fs.createWriteStream(params.outfile);
   const moduleNames : Set<string> = new Set(dbTables.map(dbt => dbt.scopedDecl.moduleName));
@@ -365,7 +378,7 @@ const mssql2DbProfile: DbProfile = {
     case "Int8" : return "smallint";
     case "Int16" : return "smallint";
     case "Int32" : return "int";
-    case "Int64" : return "bigint";
+    case "Int64" : return "bigint"
     case "Word8" : return "smallint";
     case "Word16" : return "smallint";
     case "Word32" : return "int";
@@ -378,9 +391,76 @@ const mssql2DbProfile: DbProfile = {
   }
 };
 
+export async function generateMetadata(outmetadata: string, params: Params, loadedAdl: LoadedAdl, dbTables0: DbTable[]): Promise<void> {
+  const jbDecl = createJsonBinding(loadedAdl.resolver,adlast.texprDecl());
+  const writer = fs.createWriteStream(outmetadata);
+
+  // Exclude metadata for the metadata tables
+  const dbTables = dbTables0.filter(dbt => dbt.name != 'meta_table' && dbt.name !== 'meta_adl_decl');
+
+  writer.write('delete from meta_table;\n');
+  for(const dbTable of dbTables) {
+    const docAnn = getAnnotation(dbTable.scopedDecl.decl.annotations, DOC);
+    const description = typeof docAnn === "string" ? docAnn : "";
+    writer.write( `insert into meta_table(name,description,decl_module_name, decl_name) values (${dbstr(dbTable.name)},${dbstr(description)},${dbstr(dbTable.scopedDecl.moduleName)},${dbstr(dbTable.scopedDecl.decl.name)});\n` );
+  }
+
+  writer.write('\n');
+
+  writer.write('delete from meta_adl_decl;\n');
+  insertDecls(loadedAdl.resolver, writer, dbTables.map(dbt => dbt.scopedDecl));
+  writer.end();
+}
+
+function insertDecls(resolver: adl.DeclResolver, writer: fs.WriteStream, sdecls:adlast.ScopedDecl[]) {
+  const done: {[name: string]:boolean}= {};
+  const jbDecl = createJsonBinding(resolver,adlast.texprDecl());
+
+  function insertDecl(sdecl:adlast.ScopedDecl) {
+     const name = sdecl.moduleName + '.' + sdecl.decl.name;
+     if (done[name] === undefined ) {
+       const jsdecl = JSON.stringify(jbDecl.toJson(sdecl.decl));
+       writer.write(`insert into meta_adl_decl(module_name,name,decl) values (${dbstr(sdecl.moduleName)},${dbstr(sdecl.decl.name)}, ${dbstr(jsdecl)});\n`);
+       done[name] = true;
+       switch(sdecl.decl.type_.kind) {
+       case 'struct_':
+       case 'union_':
+         for(const field of sdecl.decl.type_.value.fields) {
+           insertTypeExpr(field.typeExpr);
+         }
+       break;
+       case 'newtype_':
+       case 'type_':
+         insertTypeExpr(sdecl.decl.type_.value.typeExpr);
+       break;
+       }
+     }
+  }
+
+  function insertTypeExpr(texpr:adlast.TypeExpr) {
+    switch(texpr.typeRef.kind) {
+      case 'reference':
+        const sname = texpr.typeRef.value;
+        const decl = resolver(sname);
+        insertDecl(decl);
+        break;
+      case 'primitive':
+      case 'typeParam':
+        break;
+    }
+    texpr.parameters.forEach(te => insertTypeExpr(te));
+  }
+
+  sdecls.forEach( insertDecl );
+}
+
+function dbstr(s: string) {
+  return "'" + s.replace(/'/g, "''") + "'";
+}
 
 
 
+const DOC = scopedName("sys.annotations", "Doc");
 const MAYBE = scopedName("sys.types", "Maybe");
 const DB_TABLE = scopedName("common.db", "DbTable");
 const DB_COLUMN_NAME = scopedName("common.db", "DbColumnName")
