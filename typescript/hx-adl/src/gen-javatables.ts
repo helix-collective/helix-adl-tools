@@ -11,6 +11,7 @@ export function configureCli(program: Command) {
    .option('--no-overwrite', 'Don\'t update files that haven\'t changed')
    .option('--rtpackage <package>', 'The  package where the ADL runtime can be found')
    .option('--package <package>', 'The  package into which the generated ADL code will be placed')
+   .option('--manifest <file>', 'Write a manifest file recording generated files')
    .option('--crudfns', 'Generate CRUD helper functions')
    .description('Generate java table definitions')
    .action( (_adlFiles:string[], cmd) => {

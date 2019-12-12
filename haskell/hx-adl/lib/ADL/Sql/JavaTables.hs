@@ -24,7 +24,7 @@ import qualified ADL.Sql.Schema as SC
 import ADL.Compiler.EIO
 import ADL.Compiler.Primitive
 import ADL.Compiler.Processing(AdlFlags(..),ResolvedType, RModule,RDecl,defaultAdlFlags,loadAndCheckModule1,removeModuleTypedefs, expandModuleTypedefs, associateCustomTypes, refEnumeration, refNewtype, ResolvedTypeT(..))
-import ADL.Compiler.Utils(FileWriter,writeOutputFile)
+import ADL.Compiler.Utils(FileWriter,withManifest)
 import ADL.Compiler.Flags(Flags(..),parseArguments,standardOptions, addToMergeFileExtensions)
 import ADL.Utils.IndentedCode
 import ADL.Utils.Format(template,formatText)
@@ -72,18 +72,18 @@ generateJavaTables args = do
   let header = "Usage: generate.hs java-tables ...args..."
       options =  standardOptions <> javaTableOptions
   (flags0,paths) <- parseArguments header defaultAdlFlags defaultJavaTableFlags options args
-  let fileWriter = writeOutputFile (f_output flags)
-      flags = addToMergeFileExtensions "adl-java" flags0
-      cgp = J.defaultCodeGenProfile{J.cgp_runtimePackage=(J.javaPackage (jt_rtpackage (f_backend flags)))}
-  for_ paths $ \path -> do
-    (mod0,moddeps) <- loadAndCheckModule1 (f_adl flags) path
-    let javaPackageFn = J.mkJavaPackageFn cgp (mod0:moddeps) (J.javaPackage (jt_package (f_backend flags)))
-        schema = SC.schemaFromAdl SC.postgresDbProfile mod0
-        mod = ( associateCustomTypes J.getCustomType (AST.m_name mod0)
-              . removeModuleTypedefs
-              . expandModuleTypedefs
-              ) mod0
-    liftIO $ writeModuleJavaTables fileWriter (f_backend flags) cgp javaPackageFn schema mod
+  let flags = addToMergeFileExtensions "adl-java" flags0
+  withManifest (f_output flags) $ \fileWriter -> do
+    let cgp = J.defaultCodeGenProfile{J.cgp_runtimePackage=(J.javaPackage (jt_rtpackage (f_backend flags)))}
+    for_ paths $ \path -> do
+      (mod0,moddeps) <- loadAndCheckModule1 (f_adl flags) path
+      let javaPackageFn = J.mkJavaPackageFn cgp (mod0:moddeps) (J.javaPackage (jt_package (f_backend flags)))
+          schema = SC.schemaFromAdl SC.postgresDbProfile mod0
+          mod = ( associateCustomTypes J.getCustomType (AST.m_name mod0)
+                . removeModuleTypedefs
+                . expandModuleTypedefs
+                ) mod0
+      liftIO $ writeModuleJavaTables fileWriter (f_backend flags) cgp javaPackageFn schema mod
 
 -- | Generate the java table mapping code for a resolved ADL module
 writeModuleJavaTables :: FileWriter -> JavaTableFlags -> J.CodeGenProfile -> J.JavaPackageFn -> SC.Schema -> J.CModule -> IO ()
