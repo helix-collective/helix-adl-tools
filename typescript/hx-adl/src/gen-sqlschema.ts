@@ -275,16 +275,17 @@ function getColumnType1(resolver: adl.DeclResolver, typeExpr: adlast.TypeExpr, d
     case "Reference":
       const sdecl = resolver(dtype.refScopedName);
 
+      const ann = getAnnotation(sdecl.decl.annotations, DB_COLUMN_TYPE);
+      if (typeof(ann) === 'string') {
+        return ann;
+      }
+
       if (scopedNamesEqual(dtype.refScopedName, INSTANT)) {
         return "timestamp";
       } else if (scopedNamesEqual(dtype.refScopedName, LOCAL_DATE)) {
         return "date";
       } else if (scopedNamesEqual(dtype.refScopedName, LOCAL_DATETIME)) {
         return "timestamp";
-      } else if (scopedNamesEqual(dtype.refScopedName, GEOMETRY_WKT)) {
-        return "geometry";
-      } else if (scopedNamesEqual(dtype.refScopedName, GEOGRAPHY_GEO_JSON)) {
-        return "geography";
       } else if (sdecl.decl.type_.kind == 'union_' && isEnum(sdecl.decl.type_.value)) {
         return dbProfile.enumColumnType;
       }
@@ -469,6 +470,4 @@ const DB_KEY = scopedName("common.db", "DbKey")
 const INSTANT = scopedName("common", "Instant");
 const LOCAL_DATE = scopedName("common", "LocalDate");
 const LOCAL_DATETIME = scopedName("common", "LocalDateTime");
-const GEOMETRY_WKT = scopedName("common", "GeometryWKT");
-const GEOGRAPHY_GEO_JSON = scopedName("common", "GeographyGeoJson");
 

@@ -308,103 +308,110 @@ javaFieldName (IdColumn _) = "id"
 javaFieldName (DbColumn _ field) = J.unreserveWord (AST.f_name field)
 
 javaDbType :: SC.Column -> AST.Field J.CResolvedType -> T.Text
-javaDbType col field
-  | refEnumeration (AST.f_type field) = "String"
-  | SC.column_ctype col == "text" = "String"
-  | "varchar" `T.isPrefixOf` SC.column_ctype col = "String"
-  | "nvarchar" `T.isPrefixOf` SC.column_ctype col = "String"
-  | SC.column_ctype col == "boolean" = "Boolean"
-  | SC.column_ctype col == "json" = "JsonElement"
-  | SC.column_ctype col == "jsonb" = "JsonElement"
-  | SC.column_ctype col == "bigint" = "Long"
-  | SC.column_ctype col == "integer" = "Integer"
-  | SC.typeExprReferences SC.instantType te  = "java.time.Instant"
-  | SC.typeExprReferences SC.localDateTimeType te = "java.time.LocalDateTime"
-  | SC.typeExprReferences SC.localDateType te = "java.time.LocalDate"
-  | SC.typeExprReferences SC.geographyType te = "org.postgis.PGgeometry"
-  | SC.typeExprReferences SC.geographyGeoJsonType te = "org.postgis.PGgeometry"
-  | SC.typeExprReferences SC.geometryWKTType te = "org.postgis.PGgeometry"
-  | SC.column_ctype col == "double precision" = "Double"
-  | "float" `T.isPrefixOf` SC.column_ctype col = "Double"
-  | otherwise = "unimp:" <> SC.column_ctype col
+javaDbType col field = case customDbType col field of
+  (Just dbType) -> dbType
+  _ -> standardDbType
   where
     te = SC.columnTypeFromField SC.postgresDbProfile field
+
+    standardDbType
+      | refEnumeration (AST.f_type field) = "String"
+      | SC.column_ctype col == "text" = "String"
+      | "varchar" `T.isPrefixOf` SC.column_ctype col = "String"
+      | "nvarchar" `T.isPrefixOf` SC.column_ctype col = "String"
+      | SC.column_ctype col == "boolean" = "Boolean"
+      | SC.column_ctype col == "json" = "JsonElement"
+      | SC.column_ctype col == "jsonb" = "JsonElement"
+      | SC.column_ctype col == "bigint" = "Long"
+      | SC.column_ctype col == "integer" = "Integer"
+      | SC.typeExprReferences SC.instantType te  = "java.time.Instant"
+      | SC.typeExprReferences SC.localDateTimeType te = "java.time.LocalDateTime"
+      | SC.typeExprReferences SC.localDateType te = "java.time.LocalDate"
+      | SC.column_ctype col == "double precision" = "Double"
+      | "float" `T.isPrefixOf` SC.column_ctype col = "Double"
+      | otherwise = "unimp:" <> SC.column_ctype col
 
 -- Generate an expression converting a db value into an ADL value
 adlFromDbExpr :: SC.Column -> AST.Field J.CResolvedType -> T.Text -> J.CState T.Text
 adlFromDbExpr col field expr = do
   let ftype = AST.f_type field
+      customHelpers = customDbHelpers col field
   cgp <- fmap J.cf_codeProfile get
   fdetails <- J.genFieldDetails field
-  case (SC.column_nullable col,SC.column_references col, SC.column_ctype col,ftype) of
-    (True, _, "json", AST.TypeExpr _ [te]) -> do
-      jbindingExpr <- J.genJsonBindingExpr cgp te
-      return (template "Optional.ofNullable($1).map($2::fromJson)" [expr,jbindingExpr])
-    (True, _, "jsonb", AST.TypeExpr _ [te]) -> do
-      jbindingExpr <- J.genJsonBindingExpr cgp te
-      return (template "Optional.ofNullable($1).map($2::fromJson)" [expr,jbindingExpr])
-    (True, _, _, AST.TypeExpr _ [te]) -> do
-      expr1 <- adlFromDbExpr col{SC.column_nullable=False} field{AST.f_type=te,AST.f_default=Nothing} "v"
-      let mapExpr = case expr1 of
-            "v" -> ""
-            _ -> template ".map(v -> $1)" [expr1]
-      return (template "Optional.ofNullable($1)$2" [expr,mapExpr])
-    (False,_,"geography",_) -> return expr
-    (False,_,"geometry",_) -> return expr
-    (False,Just _,_,_) -> do
-      return (template "new $1($2)" [J.fd_typeExprStr fdetails,expr])
-    (False,_,"timestamp",_) -> return expr
-    (False,_,"date",_) -> return expr
-    (False,_,"json",_) -> do
-      jbindingExpr <- J.genJsonBindingExpr cgp ftype
-      return (template "$1.fromJson($2)" [jbindingExpr,expr])
-    (False,_,"jsonb",_) -> do
-      jbindingExpr <- J.genJsonBindingExpr cgp ftype
-      return (template "$1.fromJson($2)" [jbindingExpr,expr])
-    (False,_,_,_)
-            | refEnumeration ftype -> return (template "$1.fromString($2)" [J.fd_typeExprStr fdetails,expr])
-            | otherwise -> case refNewtype ftype of
-                  (Just n) -> return (template "new $1($2)" [J.fd_typeExprStr fdetails,expr])
-                  Nothing -> return expr
+
+  case (SC.column_nullable col,customHelpers) of
+    (True,Just chelpers) -> return (template "Optional.ofNullable($1).map(v -> $2.fromDb(v))" [expr,chelpers])
+    (False,Just chelpers) -> return (template "$1.fromDb($2)" [chelpers,expr])
+    _ ->  case (SC.column_nullable col,SC.column_references col, SC.column_ctype col,ftype) of
+      (True, _, "json", AST.TypeExpr _ [te]) -> do
+        jbindingExpr <- J.genJsonBindingExpr cgp te
+        return (template "Optional.ofNullable($1).map($2::fromJson)" [expr,jbindingExpr])
+      (True, _, "jsonb", AST.TypeExpr _ [te]) -> do
+        jbindingExpr <- J.genJsonBindingExpr cgp te
+        return (template "Optional.ofNullable($1).map($2::fromJson)" [expr,jbindingExpr])
+      (True, _, _, AST.TypeExpr _ [te]) -> do
+        expr1 <- adlFromDbExpr col{SC.column_nullable=False} field{AST.f_type=te,AST.f_default=Nothing} "v"
+        let mapExpr = case expr1 of
+              "v" -> ""
+              _ -> template ".map(v -> $1)" [expr1]
+        return (template "Optional.ofNullable($1)$2" [expr,mapExpr])
+      (False,Just _,_,_) -> do
+        return (template "new $1($2)" [J.fd_typeExprStr fdetails,expr])
+      (False,_,"timestamp",_) -> return expr
+      (False,_,"date",_) -> return expr
+      (False,_,"json",_) -> do
+        jbindingExpr <- J.genJsonBindingExpr cgp ftype
+        return (template "$1.fromJson($2)" [jbindingExpr,expr])
+      (False,_,"jsonb",_) -> do
+        jbindingExpr <- J.genJsonBindingExpr cgp ftype
+        return (template "$1.fromJson($2)" [jbindingExpr,expr])
+      (False,_,_,_)
+              | refEnumeration ftype -> return (template "$1.fromString($2)" [J.fd_typeExprStr fdetails,expr])
+              | otherwise -> case refNewtype ftype of
+                    (Just n) -> return (template "new $1($2)" [J.fd_typeExprStr fdetails,expr])
+                    Nothing -> return expr
 
 -- Generate an expression converting an ADL value into a db value
 dbFromAdlExpr :: SC.Column -> AST.Field J.CResolvedType -> T.Text -> J.CState T.Text
 dbFromAdlExpr col field expr = do
   let ftype = AST.f_type field
+      customHelpers = customDbHelpers col field
   cgp <- fmap J.cf_codeProfile get
   fdetails <- J.genFieldDetails field
-  case (SC.column_nullable col,SC.column_references col, SC.column_ctype col,ftype) of
-    (True, _, "json", AST.TypeExpr _ [te]) -> do
-      jbindingExpr <- J.genJsonBindingExpr cgp te
-      return (template "($1.isPresent() ? $2.toJson($1.get()) : null)" [expr, jbindingExpr])
-    (True, _, "jsonb", AST.TypeExpr _ [te]) -> do
-      jbindingExpr <- J.genJsonBindingExpr cgp te
-      return (template "($1.isPresent() ? $2.toJson($1.get()) : null)" [expr, jbindingExpr])
-    (True, _, _, AST.TypeExpr _ [te]) -> do
-      expr1 <- dbFromAdlExpr col{SC.column_nullable=False} field{AST.f_type=te,AST.f_default=Nothing} "v"
-      let mapExpr = case expr1 of
-            "v" -> ""
-            _ -> template ".map(v -> $1)" [expr1]
-      return (template "$1$2.orElse(null)" [expr,mapExpr])
-    (False,_,"geography",_) -> return expr
-    (False,_,"geometry",_) -> return expr
-    (False,Just _,_,_) -> do
-      return (template "$1.getValue()" [expr])
-    (False,_,"timestamp",_) -> return expr
-    (False,_,"date",_) -> return expr
-    (False,_,"json",_) -> do
-      jbindingExpr <- J.genJsonBindingExpr cgp ftype
-      return (template "$1.toJson($2)" [jbindingExpr,expr])
-    (False,_,"jsonb",_) -> do
-      jbindingExpr <- J.genJsonBindingExpr cgp ftype
-      return (template "$1.toJson($2)" [jbindingExpr,expr])
-    (False,_,_,_)
-            | refEnumeration ftype -> return (template "$1.toString()" [expr])
-            | otherwise -> case refNewtype ftype of
-                  (Just n) -> return (template "$1.getValue()" [expr])
-                  Nothing -> return expr
+  case (SC.column_nullable col,customHelpers) of
+    (True,Just chelpers) -> return (template "$1.map(v -> $2.toDb(v)).orElse(null)" [expr,chelpers])
+    (False,Just chelpers) -> return (template "$2.toDb($1)" [expr,chelpers])
+    _ -> case (SC.column_nullable col,SC.column_references col, SC.column_ctype col,ftype) of
+      (True, _, "json", AST.TypeExpr _ [te]) -> do
+        jbindingExpr <- J.genJsonBindingExpr cgp te
+        return (template "($1.isPresent() ? $2.toJson($1.get()) : null)" [expr, jbindingExpr])
+      (True, _, "jsonb", AST.TypeExpr _ [te]) -> do
+        jbindingExpr <- J.genJsonBindingExpr cgp te
+        return (template "($1.isPresent() ? $2.toJson($1.get()) : null)" [expr, jbindingExpr])
+      (True, _, _, AST.TypeExpr _ [te]) -> do
+        expr1 <- dbFromAdlExpr col{SC.column_nullable=False} field{AST.f_type=te,AST.f_default=Nothing} "v"
+        let mapExpr = case expr1 of
+              "v" -> ""
+              _ -> template ".map(v -> $1)" [expr1]
+        return (template "$1$2.orElse(null)" [expr,mapExpr])
+      (False,Just _,_,_) -> do
+        return (template "$1.getValue()" [expr])
+      (False,_,"timestamp",_) -> return expr
+      (False,_,"date",_) -> return expr
+      (False,_,"json",_) -> do
+        jbindingExpr <- J.genJsonBindingExpr cgp ftype
+        return (template "$1.toJson($2)" [jbindingExpr,expr])
+      (False,_,"jsonb",_) -> do
+        jbindingExpr <- J.genJsonBindingExpr cgp ftype
+        return (template "$1.toJson($2)" [jbindingExpr,expr])
+      (False,_,_,_)
+              | refEnumeration ftype -> return (template "$1.toString()" [expr])
+              | otherwise -> case refNewtype ftype of
+                    (Just n) -> return (template "$1.getValue()" [expr])
+                    Nothing -> return expr
 
 dbTableType = AST.ScopedName (AST.ModuleName ["common","db"]) "DbTable"
+javaDbCustomType = AST.ScopedName (AST.ModuleName ["common","db"]) "JavaDbCustomType"
 withDbIdType = AST.ScopedName (AST.ModuleName ["common","db"]) "WithDbId"
 dbKeyType = AST.ScopedName (AST.ModuleName ["common","db"]) "DbKey"
 
@@ -449,6 +456,29 @@ withCommas (l:ls) = (l,","):withCommas ls
 
 dbName :: T.Text -> T.Text
 dbName =  toSnakeCase
+
+customDbType :: SC.Column -> AST.Field J.CResolvedType -> Maybe T.Text
+customDbType col field = do
+    jv <- customDbAnnotation col field
+    case getAnnotationField jv "javaDbType" of
+      Nothing -> Nothing
+      (Just (JS.String t)) -> Just t
+
+customDbHelpers :: SC.Column -> AST.Field J.CResolvedType -> Maybe T.Text
+customDbHelpers col field = do
+    jv <- customDbAnnotation col field
+    case getAnnotationField jv "helpers" of
+      Nothing -> Nothing
+      (Just (JS.String t)) -> Just t
+
+-- The annotation can be be on the field, or on the declaration referenced by the field type
+customDbAnnotation :: SC.Column -> AST.Field J.CResolvedType -> Maybe JS.Value
+customDbAnnotation col field = case getAnnotation (AST.f_annotations field) javaDbCustomType of
+   (Just jv) -> Just jv
+   Nothing -> case (SC.column_nullable col,AST.f_type field) of
+      (False, AST.TypeExpr (RT_Named (_,decl))  _) -> getAnnotation (AST.d_annotations decl) javaDbCustomType
+      (True, AST.TypeExpr _ [AST.TypeExpr (RT_Named (_,decl)) _]) -> getAnnotation (AST.d_annotations decl) javaDbCustomType
+      _ -> Nothing
 
 getAnnotation :: AST.Annotations J.CResolvedType -> AST.ScopedName -> Maybe JS.Value
 getAnnotation annotations annotationName = snd <$> M.lookup annotationName annotations
