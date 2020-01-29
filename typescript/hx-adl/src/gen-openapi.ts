@@ -4,45 +4,46 @@ import * as path from 'path';
 import * as OAPI from "./openapi/openapi-utils";
 
 import { Command } from "commander";
-import { AdlStore, RequestDecl } from "./openapi/adl-utils";
-import { collect, parseAdl } from "./util";
+import { collect, parseAdl, scopedNameFromString  } from "./util";
+import * as adlast from "./adl-gen/runtime/sys/adlast";
 
 export function configureCli(program: Command) {
   program
-   .command("openapi [adlFiles...]")
+   .command("openapi <apiscopedname> [adlFiles...]")
    .option('-I, --searchdir <path>', 'Add to adl searchpath', collect, [])
    .option('--outfile <path>', 'the resulting openapi file', 'openapi.yaml')
-   .description('Generate an openapi specfication from ADL request definitions')
-   .action( (adlFiles:string[], cmd:{}) => {
+   .description('Generate an openapi specfication from an ADL specified htttp API')
+   .action( (apiscopedname, adlFiles:string[], cmd:{}) => {
      const adlSearchPath: string[] = cmd['searchdir'];
      let outfile: string = cmd['outfile'];
      if (cmd['outputdir']) {
        outfile = cmd['outputdir'] + '/openapi.yaml';
      }
-     generateOpenApiSpec({adlFiles, adlSearchPath, outfile});
+     if (adlFiles.length == 0) {
+       throw new Error("No adl files specifed");
+     }
+     generateOpenApiSpec( {
+       apiscopedname: scopedNameFromString(apiscopedname),
+       adlFiles,
+       adlSearchPath,
+       outfile
+     });
    });
 }
 
 export interface Params {
+  apiscopedname: adlast.ScopedName;
   adlFiles: string[];
   adlSearchPath: string[];
   outfile: string;
 };
 
+
 export async function generateOpenApiSpec(params: Params): Promise<void> {
   // Load the ADL based upon command line arguments
   const loadedAdl = await parseAdl(params.adlFiles, params.adlSearchPath);
 
-  const adlStore: AdlStore = new AdlStore(
-    loadedAdl.allAdlDecls,
-    [{title:'all', requests: _r => true}],
-    []
-  );
-  const requestDecls: RequestDecl[] = [];
-  adlStore.requestsByGrouping().forEach((rg) => {
-    rg.requests.forEach((r) => requestDecls.push(r));
-  });
-  const schema = OAPI.schemaFromRequests(requestDecls, adlStore);
+  const schema = OAPI.schemaFromApi(params.apiscopedname, loadedAdl);
   const text : string = OAPI.yamlFromJsonSchema(schema);
   mkdirp.sync(path.dirname(params.outfile));
   const writer = fs.createWriteStream(params.outfile);

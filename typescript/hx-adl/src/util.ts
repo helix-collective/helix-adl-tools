@@ -2,6 +2,7 @@ import * as adlast from './adl-gen/sys/adlast';
 import { RESOLVER }  from "./adl-gen/resolver";
 import { createJsonBinding, JsonBinding } from "./adl-gen/runtime/json";
 import * as adl from "./adl-gen/runtime/adl";
+import { typeExprToString } from "./adl-gen/runtime/utils";
 import * as tmp from "tmp";
 import { execFile } from "child_process";
 import * as fs from "fs";
@@ -17,7 +18,7 @@ export interface LoadedAdl {
 
 /**
  * Load and parse the specified ADL files (and their dependencies) into
- * an AST map.
+ * an adlast map.
  *
  * Runs the adl compiler as a subprocess, using the environment variable ADLC to
  * specify the path.
@@ -198,6 +199,86 @@ export function forEachDecl(moduleMap: AdlModuleMap, fn: (sdecl: adlast.ScopedDe
 }
 
 /**
+ * Ensure that the given declaration is monomorphic.
+ *
+ * If it already is, just return it. Otherwise construct a new ScopedDecl
+ * that has all type parameters substituted.
+ */
+export function monomorphicDecl(typeExpr: adlast.TypeExpr, declName: adlast.ScopedName, namer: MonomorphicNamer, resolver: adl.DeclResolver): adlast.ScopedDecl {
+  const decl = resolver(declName);
+  // If the type is already monomorphic, just return it
+  if (typeExpr.parameters.length == 0) {
+    return decl;
+  }
+  // Otherwise build a monomorphised decl
+  const type_ : adlast.DeclType = (() => {
+    switch (decl.decl.type_.kind) {
+      case 'type_': return {
+        kind: decl.decl.type_.kind,
+        value: {
+          typeParams: [],
+          typeExpr: substituteTypeVariables(decl.decl.type_.value.typeExpr, decl.decl.type_.value.typeParams, typeExpr.parameters),
+        },
+      }
+      case 'newtype_': return {
+        kind: decl.decl.type_.kind,
+        value: {
+          typeParams: [],
+          typeExpr: substituteTypeVariables(decl.decl.type_.value.typeExpr, decl.decl.type_.value.typeParams, typeExpr.parameters),
+          default: decl.decl.type_.value.default,
+        },
+      }
+      case 'struct_': return {
+        kind: decl.decl.type_.kind,
+        value: {
+          typeParams: [],
+          fields: decl.decl.type_.value.fields.map( f => ({
+            name: f.name,
+            serializedName: f.serializedName,
+            typeExpr: substituteTypeVariables(f.typeExpr, decl.decl.type_.value.typeParams, typeExpr.parameters),
+            default: f.default,
+            annotations: f.annotations
+          })),
+        },
+      }
+      case 'union_': return {
+        kind: decl.decl.type_.kind,
+        value: {
+          typeParams: [],
+          fields: decl.decl.type_.value.fields.map( f => ({
+            name: f.name,
+            serializedName: f.serializedName,
+            typeExpr: substituteTypeVariables(f.typeExpr, decl.decl.type_.value.typeParams, typeExpr.parameters),
+            default: f.default,
+            annotations: f.annotations
+          })),
+        },
+      }
+  }})();
+  return {
+    moduleName: decl.moduleName,
+    decl: {
+      name: namer(decl.decl.name, typeExpr.parameters),
+      version: decl.decl.version,
+      annotations: decl.decl.annotations,
+      type_,
+    }
+  };
+}
+
+type MonomorphicNamer = (declName: string, typeParams: adlast.TypeExpr[]) => string;
+
+/**
+ * A default monomorphic namer that is just the type expression converted to a string
+ */
+export function monomorphicName(declName: string, typeParams: adlast.TypeExpr[]): string {
+  if (typeParams.length == 0) {
+    return declName;
+  }
+  return declName + "<" + typeParams.map(te => typeExprToString(te)).join(",") + ">";
+}
+
+/**
  * Return the json value for the given annotation type for the given decl. Return undefined if the
  * decl doesn't have that annotation
  */
@@ -208,6 +289,21 @@ export function getAnnotation(annotations: adlast.Annotations, annotationType: a
     }
   }
   return undefined;
+}
+
+export function getStringAnnotation(annotations: adlast.Annotations, atype: adlast.ScopedName): string | undefined {
+  const ann = getAnnotation(annotations, atype);
+  return ann && typeof ann === "string" ? ann : undefined;
+}
+
+
+export function getNumberAnnotation(annotations: adlast.Annotations, atype: adlast.ScopedName): number | undefined {
+  const ann = getAnnotation(annotations, atype);
+  return ann && typeof ann === "number" ? ann : undefined;
+}
+
+export function hasAnnotation(annotations: adlast.Annotations, atype: adlast.ScopedName): boolean {
+  return getAnnotation(annotations, atype) != undefined;
 }
 
 export type DecodedTypeExpr
@@ -259,6 +355,14 @@ export function decodeTypeExpr(typeExpr: adlast.TypeExpr): DecodedTypeExpr {
       return {kind:"Reference", refScopedName: typeExpr.typeRef.value, parameters:typeExpr.parameters.map(decodeTypeExpr)};
   }
   return {kind:"Other", typeExpr};
+}
+
+export function scopedNameFromString(s: string): adlast.ScopedName {
+  const ss = s.split(/\./);
+  return {
+     moduleName: ss.slice(0,ss.length - 1).join('.'),
+     name: ss[ss.length-1]
+  };
 }
 
 export function scopedName(moduleName:string, name: string): adlast.ScopedName {
