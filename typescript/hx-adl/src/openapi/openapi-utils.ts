@@ -1,7 +1,7 @@
 import * as AST from "../adl-gen/runtime/sys/adlast";
 import {typeExprToString} from "../adl-gen/runtime/utils";
 import {DeclResolver} from "../adl-gen/runtime/adl";
-import {LoadedAdl, scopedNamesEqual, monomorphicDecl, getAnnotation, getStringAnnotation} from "../util";
+import {LoadedAdl, scopedNamesEqual, monomorphicDecl, getAnnotation, getStringAnnotation, getBooleanAnnotation} from "../util";
 import * as YAML from "js-yaml";
 import {cloneDeep} from "lodash";
 
@@ -30,6 +30,9 @@ export function schemaFromApi(apiscopedname: AST.ScopedName, loadedAdl: LoadedAd
 
   // Each field in the API struct is a request
   for(const field of api.decl.type_.value.fields) {
+    if (getBooleanAnnotation(field.annotations, OPENAPI_EXCLUDE)) {
+      continue;
+    }
     const otherResponses
        = getAnnotation(field.annotations, OPENAPI_OTHER_RESPONSES)
        || commonResponses
@@ -48,8 +51,10 @@ export function schemaFromApi(apiscopedname: AST.ScopedName, loadedAdl: LoadedAd
       declSchemas.addTypeExpr(apiRequest.responseType);
       break;
     }
-    paths[apiRequest.path] = schemaFromRequest(apiRequest, loadedAdl.resolver);
-
+    if (paths[apiRequest.path] === undefined) {
+      paths[apiRequest.path] = {};
+    }
+    paths[apiRequest.path][apiRequest.method] = schemaFromRequest(apiRequest, loadedAdl.resolver);
   }
 
   // Always include a security schema for JWTs
@@ -58,7 +63,7 @@ export function schemaFromApi(apiscopedname: AST.ScopedName, loadedAdl: LoadedAd
   components["securitySchemes"] = securitySchemes;
   components['schemas'] = declSchemas.schemas;
 
-  return {
+  const result: JsonSchema = {
     openapi: "3.0.0",
     info: {
       version: "1.0.0",
@@ -67,6 +72,14 @@ export function schemaFromApi(apiscopedname: AST.ScopedName, loadedAdl: LoadedAd
     paths,
     components,
   };
+
+  // Include the server list if annotated
+  const servers = getAnnotation(api.decl.annotations, OPENAPI_SERVERS);
+  if (servers) {
+    result['servers'] = servers;
+  }
+
+  return result;
 }
 
 type Roles = string[];
@@ -306,9 +319,7 @@ export function schemaFromRequest(apiRequest: ApiRequest, resolver: DeclResolver
     properties.security = [{ TokenAuth: [] }];
   }
 
-
-  schema[apiRequest.method] = properties;
-  return schema;
+  return properties;
 }
 
 function paramsFromType(typeExpr: AST.TypeExpr, resolver: DeclResolver): RequestParam[] {
@@ -319,12 +330,20 @@ function paramsFromType(typeExpr: AST.TypeExpr, resolver: DeclResolver): Request
   if (decl.decl.type_.kind != 'struct_') {
     throw new Error("request parameters must be a reference to a struct");
   }
-  return decl.decl.type_.value.fields.map( field => ({
-    name: field.name,
-    typeExpr: field.typeExpr,
-    description: getStringAnnotation(field.annotations, DOC) || "",
-    hasDefault: field.default.kind != 'nothing',
-  }));
+
+  const result: RequestParam[] = [];
+  for(const field of decl.decl.type_.value.fields) {
+    if (!getBooleanAnnotation(field.annotations, OPENAPI_EXCLUDE)) {
+      result.push({
+        name: field.name,
+        typeExpr: field.typeExpr,
+        description: getStringAnnotation(field.annotations, DOC) || "",
+        hasDefault: field.default.kind != 'nothing',
+      });
+    }
+  }
+
+  return result;
 }
 
 
@@ -395,9 +414,11 @@ export function schemaFromStruct(_decl: AST.ScopedDecl, struct: AST.Struct): Jso
   const properties: { [key: string]: JsonSchema; } = {};
   const required: string[] = [];
   struct.fields.forEach((f) => {
-    properties[f.name] = schemaFromTypeExpr(f.typeExpr);
-    if (f.default.kind == "nothing") {
-      required.push(f.name);
+    if (!getBooleanAnnotation(f.annotations, OPENAPI_EXCLUDE)) {
+      properties[f.name] = schemaFromTypeExpr(f.typeExpr);
+      if (f.default.kind == "nothing") {
+        required.push(f.name);
+      }
     }
   });
   const result: { [key: string]: JsonSchema; } = {
@@ -566,5 +587,7 @@ export const HTTP_PUT2: AST.ScopedName = { moduleName: "common.http", name: "Htt
 export const HTTP_DELETE: AST.ScopedName = { moduleName: "common.http", name: "HttpDelete" };
 export const SECURITY_SCHEME: AST.ScopedName = { moduleName: "common.http", name: "SecurityScheme" };
 export const OPENAPI_OTHER_RESPONSES: AST.ScopedName = { moduleName: "common.http", name: "OpenApiOtherResponses" };
+export const OPENAPI_EXCLUDE: AST.ScopedName = { moduleName: "common.http", name: "OpenApiExclude" };
+export const OPENAPI_SERVERS: AST.ScopedName = { moduleName: "common.http", name: "OpenApiServers" };
 export const UNIT_TYPEEXPR: AST.TypeExpr = {typeRef:{kind:'reference', value: UNIT}, parameters:[]};
 

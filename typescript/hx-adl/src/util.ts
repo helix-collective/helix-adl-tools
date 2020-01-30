@@ -302,6 +302,11 @@ export function getNumberAnnotation(annotations: adlast.Annotations, atype: adla
   return ann && typeof ann === "number" ? ann : undefined;
 }
 
+export function getBooleanAnnotation(annotations: adlast.Annotations, atype: adlast.ScopedName): boolean | undefined {
+  const ann = getAnnotation(annotations, atype);
+  return ann && typeof ann === "boolean" ? ann : undefined;
+}
+
 export function hasAnnotation(annotations: adlast.Annotations, atype: adlast.ScopedName): boolean {
   return getAnnotation(annotations, atype) != undefined;
 }
