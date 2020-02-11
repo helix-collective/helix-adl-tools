@@ -16,9 +16,6 @@ export function configureCli(program: Command) {
    .action( (apiscopedname, adlFiles:string[], cmd:{}) => {
      const adlSearchPath: string[] = cmd['searchdir'];
      let outfile: string = cmd['outfile'];
-     if (cmd['outputdir']) {
-       outfile = cmd['outputdir'] + '/openapi.yaml';
-     }
      if (adlFiles.length == 0) {
        throw new Error("No adl files specifed");
      }
@@ -44,7 +41,10 @@ export async function generateOpenApiSpec(params: Params): Promise<void> {
   const loadedAdl = await parseAdl(params.adlFiles, params.adlSearchPath);
 
   const schema = OAPI.schemaFromApi(params.apiscopedname, loadedAdl);
-  const text : string = OAPI.yamlFromJsonSchema(schema);
+  const text
+    = params.outfile.endsWith('.json')
+    ? JSON.stringify(schema, null, 2)
+    : OAPI.yamlFromJsonSchema(schema);
   mkdirp.sync(path.dirname(params.outfile));
   const writer = fs.createWriteStream(params.outfile);
   writer.write(text);
