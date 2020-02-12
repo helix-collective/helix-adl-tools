@@ -62,13 +62,18 @@ export function schemaFromApi(apiscopedname: AST.ScopedName, loadedAdl: LoadedAd
 
   components["securitySchemes"] = securitySchemes;
   components['schemas'] = declSchemas.schemas;
+  const info = getAnnotation(api.decl.annotations, OPENAPI_INFO) || {
+    version: "1.0.0",
+    title: "API",
+  };
+  const description = getAnnotation(api.decl.annotations, DOC);
+  if (description) {
+    info['description'] = description;
+  }
 
   const result: JsonSchema = {
     openapi: "3.0.0",
-    info: {
-      version: "1.0.0",
-      title: "API",
-    },
+    info,
     paths,
     components,
   };
@@ -589,5 +594,6 @@ export const SECURITY_SCHEME: AST.ScopedName = { moduleName: "common.http", name
 export const OPENAPI_OTHER_RESPONSES: AST.ScopedName = { moduleName: "common.http", name: "OpenApiOtherResponses" };
 export const OPENAPI_EXCLUDE: AST.ScopedName = { moduleName: "common.http", name: "OpenApiExclude" };
 export const OPENAPI_SERVERS: AST.ScopedName = { moduleName: "common.http", name: "OpenApiServers" };
+export const OPENAPI_INFO: AST.ScopedName = { moduleName: "common.http", name: "OpenApiInfo" };
 export const UNIT_TYPEEXPR: AST.TypeExpr = {typeRef:{kind:'reference', value: UNIT}, parameters:[]};
 
