@@ -14,7 +14,7 @@
     "commander": "^2.20.0",
     "mkdirp": "^0.5.1",
     "tmp": "^0.1.0",
-    "typescript": "^2.9.2"
+    "typescript": "^3.7.5"
   },
   "jest": {
     "transform": {
