@@ -1,8 +1,9 @@
 import * as adlast from './adl-gen/sys/adlast';
 import * as adl from "./adl-gen/runtime/adl";
 import { createJsonBinding } from "./adl-gen/runtime/json";
-import { collect, scopedName, scopedNamesEqual, expandTypes, expandNewType, expandTypeAlias, parseAdl, forEachDecl, getAnnotation, decodeTypeExpr, DecodedTypeExpr, LoadedAdl } from "./util";
+import { collect, scopedName, scopedNamesEqual, expandTypes, expandNewType, expandTypeAlias, parseAdl, forEachDecl, getAnnotation, decodeTypeExpr, LoadedAdl } from "./util";
 import * as fs from "fs";
+import * as mustache from "mustache";
 import { isEnum, typeExprToStringUnscoped } from './adl-gen/runtime/utils';
 import { Command } from "commander";
 import { snakeCase } from "change-case";
@@ -14,6 +15,7 @@ export function configureCli(program: Command) {
    .option('--outfile <path>', 'the resulting sql file', 'create.sql')
    .option('--outputdir <dir>', 'the directory into which the sql is written (deprecated)')
    .option('--outmetadata <path>', 'sql to insert the model metadata')
+   .option('--outtemplatesql <paths>', 'generate extra sql from a mustache template', collect, [])
    .option('--postgres', 'Generate sql for postgres')
    .option('--postgres-v2', 'Generate sql for postgres (model version 2)')
    .option('--mssql', 'Generate sql for microsoft sqlserver')
@@ -22,6 +24,7 @@ export function configureCli(program: Command) {
    .action( (adlFiles:string[], cmd:{}) => {
      const adlSearchPath: string[] = cmd['searchdir'];
      const extensions: string[] = cmd['extension'];
+     const templates: Template[] = parseTemplates(cmd['outtemplatesql'] || []);
 
      let outfile: string = cmd['outfile'];
      if (cmd['outputdir']) {
@@ -38,7 +41,7 @@ export function configureCli(program: Command) {
        dbProfile = mssql2DbProfile;
      }
 
-     generateSql({adlFiles, adlSearchPath, outfile, outmetadata, extensions, dbProfile});
+     generateSql({adlFiles, adlSearchPath, outfile, outmetadata, extensions, templates, dbProfile});
    });
 }
 
@@ -48,7 +51,13 @@ export interface Params {
   outfile: string;
   outmetadata: string | null;
   extensions: string[];
+  templates: Template[];
   dbProfile: DbProfile;
+};
+
+interface Template {
+  template: string;
+  outfile: string;
 };
 
 export interface DbTable {
@@ -79,6 +88,9 @@ export async function generateSql(params: Params): Promise<void> {
   await generateSqlSchema(params, loadedAdl, dbTables);
   if (params.outmetadata !== null) {
     await generateMetadata(params.outmetadata, params, loadedAdl, dbTables);
+  }
+  for(const t of params.templates) {
+    await generateTemplate(t, dbTables);
   }
 }
 
@@ -455,8 +467,35 @@ function insertDecls(resolver: adl.DeclResolver, writer: fs.WriteStream, sdecls:
   sdecls.forEach( insertDecl );
 }
 
+
+function generateTemplate(template: Template, dbtables: DbTable[]) {
+  const templateStr : string = fs.readFileSync(template.template, {encoding:'utf-8'});
+  const view : {} = {
+    tables: dbtables.map( dbtable => {
+      const attributes: {[key : string]: {}|null} = {};
+      attributes['tablename'] = dbtable.name;
+      for(const annotation of dbtable.scopedDecl.decl.annotations) {
+        attributes[annotation.v1.name] = annotation.v2;
+      }
+      return attributes;
+    }),
+  };
+  const outStr : string = mustache.render(templateStr, view);
+  fs.writeFileSync(template.outfile, outStr);
+}
+
 function dbstr(s: string) {
   return "'" + s.replace(/'/g, "''") + "'";
+}
+
+function parseTemplates(ss: string[]): Template[] {
+  return ss.map( s => {
+    const paths = s.split(":");
+    if (paths.length != 2) {
+      throw new Error("outtemplatesql parameter must be a pair of paths, separated by :");
+    }
+    return {template: paths[0], outfile: paths[1]};
+  });
 }
 
 
