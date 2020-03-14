@@ -28,6 +28,7 @@ jobs:
         with:
           packages: |
             doit
+            pystache
 
       - name: RegenAdl
         run: "doit genadl"
