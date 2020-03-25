@@ -41,8 +41,8 @@ jobs:
             doit
             pystache
 
-      - name: RegenAdl
-        run: "doit genadl"
+      #- name: RegenAdl
+      #  run: "doit genadl"
 
       - name: Set up node using nvm
         uses: dcodeIO/setup-node-nvm@v3.0.0
