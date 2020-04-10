@@ -7,7 +7,7 @@
     "@types/base64-js": "^1.2.5",
     "@types/classnames": "^2.2.6",
     "@types/react-google-recaptcha": "^0.10.0",
-    "auth0-js": "^9.8.2",
+    "auth0-js": "^9.13.2",
     "autoprefixer": "7.1.6",
     "case-sensitive-paths-webpack-plugin": "2.1.1",
     "chalk": "1.1.3",
