@@ -26,5 +26,11 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-
 
-      - name: Build and run tests
-        run: "cd haskell; stack build --fast adl-compiler; stack test --fast --no-terminal adl-compiler"
+      - name: Build core adl and run tests
+        run: "cd haskell && stack build --fast adl-compiler && stack test --fast --no-terminal adl-compiler"
+
+      - name: Build hx-adl haskell
+        run: "cd haskell && stack build --fast helix-adl-tools"
+
+      - name: Build hx-adl typescript
+        run: "cd typescript/hx-adl && rm -rf build && yarn && yarn build"
