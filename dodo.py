@@ -13,7 +13,7 @@ hxadlimagepushed = MarkerFile(HERE/'build/.hxadlimagepushed')
 
 nodemodules = YarnNodeModules(HERE / 'typescript/hx-adl')
 
-checkNodeVersion = checkNode(minVersion='8.9.1',maxVersion="11.0.0")
+checkNodeVersion = checkNode(minVersion='8.9.1',maxVersion="12")
 
 def task_node_modules():
     return nodemodules.task()
