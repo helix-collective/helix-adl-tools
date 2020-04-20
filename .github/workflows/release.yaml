@@ -1,0 +1,121 @@
+name: New release
+on:
+  push:
+    tags:
+      - v[0-9]*
+
+jobs:
+  build:
+    name: Build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-18.04, macos-latest]
+
+    steps:
+      - name: Setup Stack
+        uses: mstksg/setup-stack@v1
+
+      - name: Clone project
+        uses: actions/checkout@v2
+        with:
+          submodules: recursive
+
+        # Fetch all history so git describe works
+      - run: |
+          git fetch --prune --unshallow
+
+      - name: Get yarn cache directory path
+        id: yarn-cache-dir-path
+        run: echo "::set-output name=dir::$(yarn cache dir)"
+
+      - name: Cache yarn dependencies
+        uses: actions/cache@v1
+        id: yarn-cache # use this to check for `cache-hit` (`steps.yarn-cache.outputs.cache-hit != 'true'`)
+        with:
+          path: ${{ steps.yarn-cache-dir-path.outputs.dir }}
+          key: ${{ runner.os }}-yarn-${{ hashFiles('**/yarn.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-yarn-
+
+      - name: Cache haskell dependencies
+        uses: actions/cache@v1
+        with:
+          path: ~/.stack
+          key: ${{ runner.os }}-${{ hashFiles('haskell/stack.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-
+
+      - uses: actions/setup-python@v1
+      - uses: BSFishy/pip-action@v1
+        with:
+          packages: |
+            doit
+            pystache
+
+#      - name: Set up node using nvm
+#        uses: dcodeIO/setup-node-nvm@v3.0.0
+#        with:
+#          node-version: 11
+
+      - name: Build
+        run: "doit build_release"
+
+      - name: Upload dist directory artifacts
+        uses: actions/upload-artifact@v1
+        with:
+          name: dist-${{ runner.os }}
+          path: dist
+
+  release:
+    name: Create Github Release
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+
+    - name: Determine version
+      id: version
+      run: "echo ::set-output name=version::${GITHUB_REF:11}"
+
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1.0.0
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.ref }}
+        release_name: Release ${{ github.ref }}
+        draft: false
+        prerelease: false
+     
+    - name: Fetch macOS build
+      uses: actions/download-artifact@v1
+      with:
+        name: dist-macOS
+        path: dist-macOS
+
+    - name: Fetch linux build
+      uses: actions/download-artifact@v1
+      with:
+        name: dist-linux
+        path: dist-linux
+
+    - name: Upload macOS build
+      uses: actions/upload-release-asset@v1.0.1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: dist-macOS/hxadl-bindist.zip
+        asset_name: hxadl-bindist-${{ steps.version.outputs.version }}-osx.zip
+        asset_content_type: application/zip
+
+    - name: Upload linux build
+      uses: actions/upload-release-asset@v1.0.1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN  }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: dist-linux/hxadl-bindist.zip
+        asset_name: hxadl-bindist-${{ steps.version.outputs.version }}-linux.zip
+        asset_content_type: application/zip

@@ -15,7 +15,7 @@ hxadlimagepushed = MarkerFile(HERE/'build/.hxadlimagepushed')
 
 nodemodules = YarnNodeModules(HERE / 'typescript/hx-adl')
 
-checkNodeVersion = checkNode(minVersion='8.9.1',maxVersion="12")
+checkNodeVersion = checkNode(minVersion='8.9.1',maxVersion="13")
 
 def task_node_modules():
     return nodemodules.task()
@@ -47,7 +47,7 @@ def task_build_haskell():
     yield {
         'doc' : 'build adlc and hx-adl for platform',
         'name': 'platform',
-        'actions': actions(stack_docker,hxadlhsplatformzip),
+        'actions': actions(stack_platform,hxadlhsplatformzip),
         'file_dep': filedeps,
         'targets': [hxadlhsplatformzip],
         'verbosity' : 2,
@@ -104,15 +104,15 @@ def task_build_release():
         cmd('mkdir -p lib/js; cd lib/js; unzip -q {}'.format(os.path.abspath(hxadltszip)))
         with open(wdir + '/bin/hx-adl', 'w') as f:
           f.write('''
-  #!/bin/bash
-  INSTALLDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." >/dev/null 2>&1 && pwd )"
-  export NODE_PATH=$INSTALLDIR/lib/js
-  export HXADLHS=$INSTALLDIR/bin/hx-adl-hs
-  export ADLC=$INSTALLDIR/bin/adlc
-  if [ ! -d "NODE_PATH/node_modules" ]; then
-    (cd $NODE_PATH; yarn)
-  fi
-  node $NODE_PATH/main.js "$@"
+#!/bin/bash
+INSTALLDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." >/dev/null 2>&1 && pwd )"
+export NODE_PATH=$INSTALLDIR/lib/js
+export HXADLHS=$INSTALLDIR/bin/hx-adl-hs
+export ADLC=$INSTALLDIR/bin/adlc
+if [ ! -d "$NODE_PATH/node_modules" ]; then
+  (cd $NODE_PATH; yarn)
+fi
+node $NODE_PATH/main.js "$@"
   ''')
         cmd('chmod +x bin/hx-adl')
         bindist = os.path.abspath(hxadlbindist)
