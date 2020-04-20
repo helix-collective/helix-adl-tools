@@ -5,8 +5,10 @@ import getpass
 HOME = Path(os.environ['HOME'])
 HERE = Path('.')
 
-hxadlhszip = HERE/'build/hxadl-hs.zip'
+hxadlhslinuxzip = HERE/'build/hxadl-linux-hs.zip'            # linux binaries
+hxadlhsplatformzip = HERE/'build/hxadl-platform-hs.zip'      # platform binaries
 hxadltszip = HERE/'typescript/hx-adl/build/hxadl-ts.zip'
+hxadlbindist = HERE/'dist/hxadl-bindist.zip'
 
 hxadlimagebuilt = MarkerFile(HERE/'build/.hxadlimagebuilt')
 hxadlimagepushed = MarkerFile(HERE/'build/.hxadlimagepushed')
@@ -22,19 +24,32 @@ def task_build_haskell():
     filedeps = [f for f in rglobfiles(HERE/'haskell') if '.stack-work' not in str(f)]
     distdir = HERE/'build/dist'
 
-    return {
-        'doc' : 'build adlc and hx-adl for linux',
-        'actions': [
-            stack(['docker', 'pull']),
-            stack(['build']),
+    def actions(stackcmd, zipfile):
+       return [
+            stackcmd(['build']),
             'mkdir -p {0}/bin'.format(distdir),
-            'cp $({}) {}/bin'.format(stack(['exec', 'which', '--', 'adlc']),distdir),
-            'cp $({}) {}/bin'.format(stack(['exec', 'which', '--', 'hx-adl-hs']),distdir),
-            'cp -r $({})/.. {}/lib'.format(stack(['exec', 'adlc', '--', 'show', '--adlstdlib']), distdir),
-            'cd {}; zip -q -r {} *'.format(distdir, hxadlhszip.resolve())
-        ],
+            'cp $({}) {}/bin'.format(stackcmd(['exec', 'which', '--', 'adlc']),distdir),
+            'cp $({}) {}/bin'.format(stackcmd(['exec', 'which', '--', 'hx-adl-hs']),distdir),
+            'cp -r $({})/.. {}/lib'.format(stackcmd(['exec', 'adlc', '--', 'show', '--adlstdlib']), distdir),
+            'cd {}; zip -q -r {} *'.format(distdir, zipfile.resolve())
+        ]
+
+    yield {
+        'doc' : 'build adlc and hx-adl for linux via docker',
+        'name': 'docker',
+        'actions': [stack_docker(['docker', 'pull'])] + actions(stack_docker,hxadlhslinuxzip),
         'file_dep': filedeps,
-        'targets': [hxadlhszip],
+        'targets': [hxadlhslinuxzip],
+        'verbosity' : 2,
+        'clean': True
+    }
+
+    yield {
+        'doc' : 'build adlc and hx-adl for platform',
+        'name': 'platform',
+        'actions': actions(stack_docker,hxadlhsplatformzip),
+        'file_dep': filedeps,
+        'targets': [hxadlhsplatformzip],
         'verbosity' : 2,
         'clean': True
     }
@@ -43,8 +58,8 @@ def task_genadl():
   return {
        'doc' : 'Regenerate the typescript runtime from the adl',
        'actions': [
-          stack(['build']),
-          stack(['exec','adlc','--','typescript',
+          stack_docker(['build']),
+          stack_docker(['exec','adlc','--','typescript',
                  '--include-rt', '--include-resolver', '--runtime-dir=runtime',
                  '-O', 'typescript/hx-adl/src/adl-gen/', '-I../adl',
                  'haskell/adl/adl/stdlib/sys/adlast.adl', 'haskell/adl/adl/stdlib/sys/types.adl'
@@ -79,6 +94,43 @@ def task_build_typescript():
         'verbosity' : 2
     }
 
+def task_build_release():
+
+    def mkhxadlbindist():
+      with tempfile.TemporaryDirectory() as wdir:
+        def cmd(cmd):
+          subprocess.run(cmd, cwd=wdir, shell=True,check=True)
+        cmd('unzip -q {}'.format(os.path.abspath(hxadlhsplatformzip)))
+        cmd('mkdir -p lib/js; cd lib/js; unzip -q {}'.format(os.path.abspath(hxadltszip)))
+        with open(wdir + '/bin/hx-adl', 'w') as f:
+          f.write('''
+  #!/bin/bash
+  INSTALLDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." >/dev/null 2>&1 && pwd )"
+  export NODE_PATH=$INSTALLDIR/lib/js
+  export HXADLHS=$INSTALLDIR/bin/hx-adl-hs
+  export ADLC=$INSTALLDIR/bin/adlc
+  if [ ! -d "NODE_PATH/node_modules" ]; then
+    (cd $NODE_PATH; yarn)
+  fi
+  node $NODE_PATH/main.js "$@"
+  ''')
+        cmd('chmod +x bin/hx-adl')
+        bindist = os.path.abspath(hxadlbindist)
+        cmd('mkdir -p {0}; rm -f {1}; zip -r {1} *'.format(os.path.dirname(bindist), bindist))
+
+    return {
+        'doc' : 'Build a platform specific release archive',
+        'actions': [mkhxadlbindist],
+        'file_dep': [
+          hxadlhsplatformzip,
+          hxadltszip,
+        ],
+        'targets': [hxadlbindist],
+        'verbosity' : 2,
+        'clean' : True
+    }
+
+
 
 def task_docker_build_hxadl_image():
     installsh = HERE/'platform/docker/install.sh'
@@ -87,7 +139,7 @@ def task_docker_build_hxadl_image():
     yarnlock = HERE/'typescript/hx-adl/yarn.lock'
 
     context = DockerContext()
-    context.file(hxadlhszip, hxadlhszip.name)
+    context.file(hxadlhslinuxzip, hxadlhslinuxzip.name)
     context.file(hxadltszip, hxadltszip.name)
     context.file(packagejson, packagejson.name)
     context.file(yarnlock, yarnlock.name)
@@ -110,8 +162,8 @@ def task_docker_build_hxadl_image():
     image.cmd('COPY {} /opt/bin/hx-adl'.format(hxadlsh.name))
 
     # Then the haskell code
-    image.cmd('COPY {} /tmp'.format(hxadlhszip.name))
-    image.cmd('RUN unzip /tmp/{0} -d /opt && rm -r /tmp/{0}'.format(hxadlhszip.name))
+    image.cmd('COPY {} /tmp'.format(hxadlhslinuxzip.name))
+    image.cmd('RUN unzip /tmp/{0} -d /opt && rm -r /tmp/{0}'.format(hxadlhslinuxzip.name))
     image.cmd('ENV PATH="/opt/bin:${PATH}"')
 
     # and cleanup
@@ -143,6 +195,9 @@ def task_docker_push_hxadl_image():
         'clean' : True
     }
 
-def stack(args):
+def stack_docker(args):
     return 'stack --stack-yaml={} --docker {}'.format(HERE/'haskell/stack.yaml',' '.join(args))
+
+def stack_platform(args):
+    return 'stack --stack-yaml={} {}'.format(HERE/'haskell/stack.yaml',' '.join(args))
 
