@@ -22,6 +22,8 @@ jobs:
       - name: Clone project
         # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
         uses: actions/checkout@v2
+        with:
+          submodules: true
 
       - name: Cache dependencies
         uses: actions/cache@v1
@@ -30,9 +32,6 @@ jobs:
           key: ${{ runner.os }}-${{ hashFiles('haskell/stack.yaml') }}
           restore-keys: |
             ${{ runner.os }}-
-
-      - name: Checkout submodule
-        run: "git submodule update --init"
 
       - uses: actions/setup-python@v1
       - uses: BSFishy/pip-action@v1
