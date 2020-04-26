@@ -10,7 +10,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-18.04, macos-latest]
+        os: [ubuntu-16.04, macos-latest]
 
     steps:
       - name: Setup Stack
@@ -42,9 +42,9 @@ jobs:
         uses: actions/cache@v1
         with:
           path: ~/.stack
-          key: ${{ runner.os }}-${{ hashFiles('haskell/stack.yaml') }}
+          key: ${{ runner.os }}-2-${{ hashFiles('haskell/stack.yaml') }}
           restore-keys: |
-            ${{ runner.os }}-
+            ${{ runner.os }}-2-
 
       - uses: actions/setup-python@v1
       - uses: BSFishy/pip-action@v1
