@@ -69,9 +69,9 @@ jobs:
         uses: actions/cache@v1
         with:
           path: ~/.stack
-          key: ${{ matrix.os }}-${{ hashFiles('haskell/stack.yaml') }}
+          key: ${{ matrix.os }}-3-${{ hashFiles('haskell/stack.yaml') }}
           restore-keys: |
-            ${{ matrix.os }}-
+            ${{ matrix.os }}-3-
 
       - uses: actions/setup-python@v1
       - uses: BSFishy/pip-action@v1
