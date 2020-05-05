@@ -1,6 +1,9 @@
 from hx.dodo_helpers import *
 from datetime import date
 import getpass
+import sys
+import shutil
+import os
 
 HOME = Path(os.environ['HOME'])
 HERE = Path('.')
@@ -130,7 +133,50 @@ node $NODE_PATH/main.js "$@"
         'clean' : True
     }
 
+def task_install_release():
 
+    def install_release(asversion, force):
+        platform = sys.platform
+        if platform.startswith('linux'):
+            cachedir=Path(os.environ["HOME"])/".cache"/"hxadl"
+        elif platform.startswith('darwin'):
+            cachedir=Path(os.environ["HOME"])/"Library"/"Caches"/"hxadl"
+        else:
+            raise Exception(f'Unimplemented platform {platform}')
+        dest=cachedir/asversion
+
+        if dest.exists():
+            if force:
+                shutil.rmtree(str(dest), ignore_errors=True)
+            else:
+                raise FileExistsError(f"Destination {str(dest)} exists already")
+
+        dest.mkdir(parents=True, exist_ok=True)
+        subprocess.run(f'unzip -q {os.path.abspath(hxadlbindist)}', cwd=str(dest), shell=True, check=True)
+
+    return {
+        'doc': "build release and install in local cache dir for use by adlenv",
+        'params':[{
+            'name':'asversion',
+            'short':'v',
+            'long': 'version',
+            'type': str,
+            'default': "dev",
+            'help': 'Install as hxadl version string'},
+            {
+            'name':'force',
+            'short':'f',
+            'long': 'force',
+            'type': bool,
+            'default': False,
+            'help': 'replace existing'}
+        ],
+        'task_dep': [
+            'build_release'
+        ],
+        'verbosity': 2,
+        'actions': [(install_release,)]
+    }
 
 def task_docker_build_hxadl_image():
     installsh = HERE/'platform/docker/install.sh'
