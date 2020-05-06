@@ -14,32 +14,7 @@ jobs:
       matrix:
         os: [ubuntu-16.04, macos-latest]
 
-    steps:
-      - name: Dump contexts
-        env:
-          GITHUB_CONTEXT: ${{ toJson(github) }}
-        run: echo "$GITHUB_CONTEXT"
-      - name: Dump job context
-        env:
-          JOB_CONTEXT: ${{ toJson(job) }}
-        run: echo "$JOB_CONTEXT"
-      - name: Dump steps context
-        env:
-          STEPS_CONTEXT: ${{ toJson(steps) }}
-        run: echo "$STEPS_CONTEXT"
-      - name: Dump runner context
-        env:
-          RUNNER_CONTEXT: ${{ toJson(runner) }}
-        run: echo "$RUNNER_CONTEXT"
-      - name: Dump strategy context
-        env:
-          STRATEGY_CONTEXT: ${{ toJson(strategy) }}
-        run: echo "$STRATEGY_CONTEXT"
-      - name: Dump matrix context
-        env:
-          MATRIX_CONTEXT: ${{ toJson(matrix) }}
-        run: echo "$MATRIX_CONTEXT"
-        
+    steps:      
       - name: Setup Stack
         uses: mstksg/setup-stack@v1
 
@@ -69,9 +44,9 @@ jobs:
         uses: actions/cache@v1
         with:
           path: ~/.stack
-          key: ${{ matrix.os }}-3-${{ hashFiles('haskell/stack.yaml') }}
+          key: ${{ matrix.os }}-${{ hashFiles('haskell/stack.yaml') }}
           restore-keys: |
-            ${{ matrix.os }}-3-
+            ${{ matrix.os }}-
 
       - uses: actions/setup-python@v1
       - uses: BSFishy/pip-action@v1
