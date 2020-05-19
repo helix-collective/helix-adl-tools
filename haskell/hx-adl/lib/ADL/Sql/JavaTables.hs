@@ -23,9 +23,11 @@ import qualified ADL.Sql.Schema as SC
 
 import ADL.Compiler.EIO
 import ADL.Compiler.Primitive
-import ADL.Compiler.Processing(AdlFlags(..),ResolvedType, RModule,RDecl,defaultAdlFlags,loadAndCheckModule1,removeModuleTypedefs, expandModuleTypedefs, associateCustomTypes, refEnumeration, refNewtype, ResolvedTypeT(..))
+import ADL.Compiler.Processing(AdlFlags(..),ResolvedType(..), RModule,RDecl,defaultAdlFlags,loadAndCheckModule1,removeModuleTypedefs, expandModuleTypedefs, associateCustomTypes, refEnumeration, refNewtype, ResolvedTypeT(..))
 import ADL.Compiler.Utils(FileWriter,withManifest)
 import ADL.Compiler.Flags(Flags(..),parseArguments,standardOptions, addToMergeFileExtensions)
+import ADL.Sql.JavaUtils
+import ADL.Sql.JavaTablesV2
 import ADL.Utils.IndentedCode
 import ADL.Utils.Format(template,formatText)
 import Control.Monad(when)
@@ -42,14 +44,6 @@ import System.FilePath(takeDirectory,(</>))
 import System.Console.GetOpt(OptDescr(..), ArgDescr(..))
 import Utils(toSnakeCase)
 
-data JavaTableFlags = JavaTableFlags {
-  jt_rtpackage :: T.Text,
-  jt_package :: T.Text,
-  jt_crudfns :: Bool
-}
-
-defaultJavaTableFlags = JavaTableFlags "adl.runtime" "adl" False
-
 javaTableOptions =
   [ Option "" ["rtpackage"]
       (ReqArg (\s f -> f{f_backend=(f_backend f){jt_rtpackage=T.pack s}}) "PACKAGE")
@@ -60,9 +54,17 @@ javaTableOptions =
   , Option "" ["crudfns"]
       (NoArg (\f -> f{f_backend=(f_backend f){jt_crudfns=True}}))
       "Generate CRUD helper functions"
+  , Option "" ["genversion"]
+      (ReqArg (\s f -> f{f_backend=(f_backend f){jt_genversion=decodeVersion s}}) "VERSION")
+      "Set the generated model version"
   ]
 
-type DBTable = (J.CDecl,AST.Struct J.CResolvedType,SC.Table,JS.Value)
+decodeVersion:: String -> GenVersion
+decodeVersion s = case map toUpper s of
+  "V1" -> V1
+  "V2" -> V2
+  _ -> error "Invalid genversion"
+
 
 -- | CLI sub command to read arguments and a list ADL files
 -- and generate java code mappinging between ADL objects
@@ -89,9 +91,14 @@ generateJavaTables args = do
 writeModuleJavaTables :: FileWriter -> JavaTableFlags -> J.CodeGenProfile -> J.JavaPackageFn -> SC.Schema -> J.CModule -> IO ()
 writeModuleJavaTables writeFile jtflags cgp javaPackageFn schema rmod = do
   let tableDecls = mapMaybe (matchDBTable schema) (M.elems (AST.m_decls rmod))
-  for_ tableDecls $ \(decl,struct,table,annotation) -> do
+  for_ tableDecls $ \(decl,struct,table,annotation,mgenversion) -> do
     let filePath = J.javaClassFilePath (J.javaClass (javaPackageFn (AST.m_name rmod)) (tableClassName decl))
-        classfile = generateJavaModel jtflags cgp javaPackageFn rmod (decl,struct,table,annotation)
+        genversion = case mgenversion of
+          (Just v) -> v
+          Nothing -> jt_genversion jtflags
+        classfile = case genversion of
+          V1 -> generateJavaModelV1 jtflags cgp javaPackageFn rmod (decl,struct,table,annotation)
+          V2 -> generateJavaModelV2 jtflags cgp javaPackageFn rmod (decl,struct,table,annotation)
         text = (T.intercalate "\n" (codeText Nothing (J.classFileCode classfile)))
     writeFile filePath (LBS.fromStrict (T.encodeUtf8 text))
 
@@ -100,8 +107,8 @@ lookupTable name schema = case find (\t -> SC.table_name t == name) (SC.schema_t
   Nothing -> error ("Can't find schema table for " <> T.unpack name)
   Just t -> t
 
-generateJavaModel :: JavaTableFlags -> J.CodeGenProfile -> J.JavaPackageFn -> J.CModule -> DBTable -> J.ClassFile
-generateJavaModel jtflags cgp javaPackageFn mod (decl,struct,table,dbTableAnnotation) = execState gen state0
+generateJavaModelV1 :: JavaTableFlags -> J.CodeGenProfile -> J.JavaPackageFn -> J.CModule -> DBTable -> J.ClassFile
+generateJavaModelV1 jtflags cgp javaPackageFn mod (decl,struct,table,dbTableAnnotation) = execState gen state0
   where
     state0 = J.classFile cgp (AST.m_name mod) javaPackageFn classDecl
     tableClassNameT = tableClassName decl
@@ -154,7 +161,7 @@ generateJavaModel jtflags cgp javaPackageFn mod (decl,struct,table,dbTableAnnota
         let javaFieldNameT = javaFieldName dbc
             (columnName,javaDbTypeT) = case dbc of
               (IdColumn col) -> (SC.column_name col,"String")
-              (DbColumn col field) -> (SC.column_name col, javaDbType col field)
+              (DbColumn col field _) -> (SC.column_name col, javaDbType col field)
         J.addMethod
           (  ctemplate "private final TypedField<$2> $1 = f(\"$3\", $2.class);"
                         [javaFieldNameT, javaDbTypeT, columnName]
@@ -181,7 +188,7 @@ generateJavaModel jtflags cgp javaPackageFn mod (decl,struct,table,dbTableAnnota
 
       if withIdPrimaryKey
         then do
-          let fields = [(dbc, col,field) | dbc@(DbColumn col field) <- dbColumns]
+          let fields = [(dbc, col,field) | dbc@(DbColumn col field _) <- dbColumns]
           genFromDbResultsWithIdKey fields
           genDbMappingWithIdKey fields
 
@@ -194,7 +201,7 @@ generateJavaModel jtflags cgp javaPackageFn mod (decl,struct,table,dbTableAnnota
 
     genFromDbResults dbColumns = do
       ctorargs <- for dbColumns $ \dbc -> case dbc of
-        (DbColumn col field) -> do
+        (DbColumn col field _) -> do
           adlFromDbExpr col field (template "res.get($1())" [AST.f_name field])
         (IdColumn col) -> return "res.get(id()"
 
@@ -208,7 +215,7 @@ generateJavaModel jtflags cgp javaPackageFn mod (decl,struct,table,dbTableAnnota
 
     genDbMapping dbColumns = do
       getters <- for dbColumns $ \dbc -> case dbc of
-        (DbColumn col field) -> do
+        (DbColumn col field _) -> do
           dbFromAdlExpr col field (template "value.get$1()" [J.javaCapsFieldName field])
         (IdColumn col) -> return ("value.getId()")
 
@@ -295,17 +302,6 @@ generateJavaModel jtflags cgp javaPackageFn mod (decl,struct,table,dbTableAnnota
           )
         )
 
-data DbColumn
-  = IdColumn SC.Column
-  | DbColumn SC.Column (AST.Field J.CResolvedType)
-
-mkDbColumns :: Bool -> [SC.Column] -> [AST.Field J.CResolvedType] -> [DbColumn]
-mkDbColumns False columns fields = zipWith DbColumn columns fields
-mkDbColumns True columns fields = (IdColumn (head columns)): mkDbColumns False(tail columns) fields
-
-javaFieldName :: DbColumn -> T.Text
-javaFieldName (IdColumn _) = "id"
-javaFieldName (DbColumn _ field) = J.unreserveWord (AST.f_name field)
 
 javaDbType :: SC.Column -> AST.Field J.CResolvedType -> T.Text
 javaDbType col field = case customDbType col field of
@@ -410,75 +406,18 @@ dbFromAdlExpr col field expr = do
                     (Just n) -> return (template "$1.getValue()" [expr])
                     Nothing -> return expr
 
-dbTableType = AST.ScopedName (AST.ModuleName ["common","db"]) "DbTable"
-javaDbCustomType = AST.ScopedName (AST.ModuleName ["common","db"]) "JavaDbCustomType"
-withDbIdType = AST.ScopedName (AST.ModuleName ["common","db"]) "WithDbId"
-dbKeyType = AST.ScopedName (AST.ModuleName ["common","db"]) "DbKey"
-
--- ----------------------------------------------------------------------
--- -- helper stuff
-
-tableClassName decl = J.unreserveWord (AST.d_name decl) <> "Table"
 
 -- match structs that are annotated to be
 -- database tables
-matchDBTable :: SC.Schema -> J.CDecl -> Maybe DBTable
+matchDBTable :: SC.Schema -> J.CDecl -> Maybe (J.CDecl,AST.Struct J.CResolvedType,SC.Table,JS.Value, Maybe GenVersion)
 matchDBTable schema decl = case AST.d_type decl of
   (AST.Decl_Struct struct) ->
     case getAnnotation (AST.d_annotations decl) dbTableType of
       Nothing -> Nothing
       (Just annotation) -> case find (\t -> SC.table_name t == dbTableName decl) (SC.schema_tables schema) of
         Nothing -> error ("Can't find schema table for oth" <> T.unpack (dbTableName decl))
-        Just table -> Just (decl,struct,table,annotation)
+        Just table -> case getAnnotation (AST.d_annotations decl) javaDbTableVersion of
+           (Just (JS.String t)) -> Just (decl,struct,table,annotation, (Just (decodeVersion (T.unpack t))))
+           Nothing -> Just (decl,struct,table,annotation, Nothing)
+
   _ -> Nothing
-
-dbTableName :: J.CDecl -> T.Text
-dbTableName decl = case getAnnotation (AST.d_annotations decl) dbTableType of
-  (Just (JS.Object hm)) -> case HM.lookup "tableName" hm of
-    (Just (JS.String t)) -> t
-    _ -> dbName (AST.d_name decl)
-  _ -> dbName (AST.d_name decl)
-
-javaTableClassName :: J.CDecl -> T.Text
-javaTableClassName decl = AST.d_name decl <> "Table"
-
-javaClassName :: J.CDecl -> T.Text
-javaClassName decl = AST.d_name decl
-
-getAnnotationField :: JS.Value -> T.Text -> Maybe JS.Value
-getAnnotationField (JS.Object hm) field = HM.lookup field hm
-getAnnotationField _ _ = Nothing
-
-withCommas :: [a] -> [(a,T.Text)]
-withCommas [] = []
-withCommas [l] = [(l," ")]
-withCommas (l:ls) = (l,","):withCommas ls
-
-dbName :: T.Text -> T.Text
-dbName =  toSnakeCase
-
-customDbType :: SC.Column -> AST.Field J.CResolvedType -> Maybe T.Text
-customDbType col field = do
-    jv <- customDbAnnotation col field
-    case getAnnotationField jv "javaDbType" of
-      Nothing -> Nothing
-      (Just (JS.String t)) -> Just t
-
-customDbHelpers :: SC.Column -> AST.Field J.CResolvedType -> Maybe T.Text
-customDbHelpers col field = do
-    jv <- customDbAnnotation col field
-    case getAnnotationField jv "helpers" of
-      Nothing -> Nothing
-      (Just (JS.String t)) -> Just t
-
--- The annotation can be be on the field, or on the declaration referenced by the field type
-customDbAnnotation :: SC.Column -> AST.Field J.CResolvedType -> Maybe JS.Value
-customDbAnnotation col field = case getAnnotation (AST.f_annotations field) javaDbCustomType of
-   (Just jv) -> Just jv
-   Nothing -> case (SC.column_nullable col,AST.f_type field) of
-      (False, AST.TypeExpr (RT_Named (_,decl))  _) -> getAnnotation (AST.d_annotations decl) javaDbCustomType
-      (True, AST.TypeExpr _ [AST.TypeExpr (RT_Named (_,decl)) _]) -> getAnnotation (AST.d_annotations decl) javaDbCustomType
-      _ -> Nothing
-
-getAnnotation :: AST.Annotations J.CResolvedType -> AST.ScopedName -> Maybe JS.Value
-getAnnotation annotations annotationName = snd <$> M.lookup annotationName annotations

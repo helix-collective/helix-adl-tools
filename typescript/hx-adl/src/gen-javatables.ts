@@ -12,6 +12,7 @@ export function configureCli(program: Command) {
    .option('--rtpackage <package>', 'The  package where the ADL runtime can be found')
    .option('--package <package>', 'The  package into which the generated ADL code will be placed')
    .option('--manifest <file>', 'Write a manifest file recording generated files')
+   .option('--genversion <version>', 'Specify the generated table code version')
    .option('--crudfns', 'Generate CRUD helper functions')
    .description('Generate java table definitions')
    .action( (_adlFiles:string[], cmd) => {
