@@ -2,6 +2,7 @@
 module ADL.Sql.SchemaUtils
   ( schemaFromAdl
   , sqlFromSchema
+  , dbKeyType
   , columnFromField
   , columnTypeFromField
   , typeExprReferences

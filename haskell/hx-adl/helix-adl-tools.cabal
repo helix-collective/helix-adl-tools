@@ -39,7 +39,9 @@ library
   hs-source-dirs:      lib
   exposed-modules:     ADL.Sql.Schema
                      , ADL.Sql.SchemaUtils
+                     , ADL.Sql.JavaUtils
                      , ADL.Sql.JavaTables
+                     , ADL.Sql.JavaTablesV2
                      , ADL.Http.JavaReqs
                      , ADL.Http.TypescriptReqs
                      , ADL.Http.Utils
