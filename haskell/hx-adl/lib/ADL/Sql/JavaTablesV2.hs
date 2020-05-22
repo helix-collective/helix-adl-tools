@@ -41,6 +41,7 @@ generateClassWithIdPrimaryKey jtflags cgp javaPackageFn mod dbtable = execState 
       J.addMethod
         (  ctemplate "private final AdlField<DbKey<$1>> id = f(\"id\", DbConversions.dbKey(), DbKey.jsonBinding($1.jsonBinding()));"
                        [javaClassNameT]
+        <> cline "@Override"
         <> ctemplate "public AdlField<DbKey<$1>> id() { return id; }" [javaClassNameT]
         )
       for_ adlColumns $ \dbc -> case dbc of
