@@ -216,7 +216,7 @@ genDbConversionExpr1 cgp texpr@(AST.TypeExpr (RT_Primitive p) tparams) =
 genDbConversionExpr1 cgp texpr
   | refEnumeration texpr = do
     typeExprStr <- J.genTypeExprB J.TypeBoxed texpr
-    return (template "DbConversions.dbenum(s -> $1.fromString(s), e -> e.toString())" [typeExprStr])
+    return (template "DbConversions.dbEnum(s -> $1.fromString(s), e -> e.toString())" [typeExprStr])
   | SC.typeExprReferences SC.instantType texpr = return "DbConversions.INSTANT"
   | SC.typeExprReferences SC.localDateTimeType texpr = return "DbConversions.LOCAL_DATE_TIME"
   | SC.typeExprReferences SC.localDateType texpr = return "DbConversions.LOCAL_DATE"
