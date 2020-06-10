@@ -9,8 +9,9 @@ import qualified ADL.Sql.SchemaUtils as SC
 import qualified Data.Aeson as JS
 import qualified Data.Text as T
 
+import ADL.Compiler.AST(DeclType(..), Decl(..))
 import ADL.Compiler.Primitive
-import ADL.Compiler.Processing(AdlFlags(..),ResolvedType(..), RModule,RDecl,defaultAdlFlags,loadAndCheckModule1,removeModuleTypedefs, expandModuleTypedefs, associateCustomTypes, refEnumeration, refNewtype, ResolvedTypeT(..))
+import ADL.Compiler.Processing(AdlFlags(..),ResolvedType(..), RModule,RDecl,defaultAdlFlags,loadAndCheckModule1,removeModuleTypedefs, expandModuleTypedefs, associateCustomTypes, refEnumeration, refNewtype, expNewtype, ResolvedTypeT(..))
 import ADL.Sql.JavaUtils
 import ADL.Utils.Format(template,formatText)
 import ADL.Utils.IndentedCode
@@ -188,15 +189,16 @@ generateClassCommon dbtable  = do
 
 
 
-genDbConversionExpr:: J.CodeGenProfile -> SC.Column -> AST.TypeExpr J.CResolvedType -> J.CState T.Text
-genDbConversionExpr cgp col texpr@(AST.TypeExpr _ tparams) =  case SC.column_nullable col of
-  False -> genDbConversionExpr1 cgp texpr
+genDbConversionExpr:: J.CodeGenProfile -> SC.Column -> AST.TypeExpr J.CResolvedType -> J.FieldDetails -> J.CState T.Text
+genDbConversionExpr cgp col texpr@(AST.TypeExpr _ tparams) fd =  case SC.column_nullable col of
+  False -> genDbConversionExpr1 cgp texpr fd
   True -> do
-    dbconv <- genDbConversionExpr1 cgp (head tparams)
+    fdinner <- J.genFieldDetails (J.fd_field fd){AST.f_type=(head tparams), AST.f_default=Nothing}
+    dbconv <- genDbConversionExpr1 cgp (head tparams) fdinner
     return (template "DbConversions.nullable($1)" [dbconv])
 
-genDbConversionExpr1:: J.CodeGenProfile -> AST.TypeExpr J.CResolvedType -> J.CState T.Text
-genDbConversionExpr1 cgp texpr@(AST.TypeExpr (RT_Primitive p) tparams) =
+genDbConversionExpr1:: J.CodeGenProfile -> AST.TypeExpr J.CResolvedType -> J.FieldDetails -> J.CState T.Text
+genDbConversionExpr1 cgp texpr@(AST.TypeExpr (RT_Primitive p) tparams) fd =
   case p of
     P_Bool -> return "DbConversions.BOOLEAN"
     P_Int8 -> return "DbConversions.BYTE"
@@ -213,7 +215,7 @@ genDbConversionExpr1 cgp texpr@(AST.TypeExpr (RT_Primitive p) tparams) =
     _ -> do
       jb <- J.genJsonBindingExpr cgp texpr
       return (template "DbConversions.json($1)" [jb])
-genDbConversionExpr1 cgp texpr
+genDbConversionExpr1 cgp texpr fd
   | refEnumeration texpr = do
     typeExprStr <- J.genTypeExprB J.TypeBoxed texpr
     return (template "DbConversions.dbEnum(s -> $1.fromString(s), e -> e.toString())" [typeExprStr])
@@ -221,9 +223,15 @@ genDbConversionExpr1 cgp texpr
   | SC.typeExprReferences SC.localDateTimeType texpr = return "DbConversions.LOCAL_DATE_TIME"
   | SC.typeExprReferences SC.localDateType texpr = return "DbConversions.LOCAL_DATE"
   | SC.typeExprReferences SC.dbKeyType texpr = return "DbConversions.dbKey()"
-  | otherwise = do
-      jb <- J.genJsonBindingExpr cgp texpr
-      return (template "DbConversions.json($1)" [jb])
+  | otherwise = case expNewtype texpr of
+
+      (Just (scopedname, innertype, [tparams])) -> do
+        dbConvInnerType <- genDbConversionExpr1 cgp (AST.n_typeExpr innertype) fd
+        return (template "DbConversions.newtype($2::getValue, $2::new, $1)" [dbConvInnerType, J.fd_boxedTypeExprStr fd])
+
+      Nothing -> do
+        jb <- J.genJsonBindingExpr cgp texpr
+        return (template "DbConversions.json($1)" [jb])
 
 type AdlColumn = (SC.Column,J.FieldDetails,T.Text,T.Text)
 
@@ -232,7 +240,7 @@ mkAdlColumns cgp columns fields = for (zip nonIdColumns fields) $ \(col, field) 
   fd <- J.genFieldDetails field
   jb <- J.genJsonBindingExpr cgp (AST.f_type (J.fd_field fd))
   dbconv <- case customDbHelpers col field of
-    Nothing -> genDbConversionExpr cgp col (AST.f_type (J.fd_field fd))
+    Nothing -> genDbConversionExpr cgp col (AST.f_type (J.fd_field fd)) fd
     (Just helperClass) -> do
       case SC.column_nullable col of
          False -> return (template "$1.dbConversion()" [helperClass])
