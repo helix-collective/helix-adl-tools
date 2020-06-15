@@ -225,7 +225,7 @@ genDbConversionExpr1 cgp texpr fd
   | SC.typeExprReferences SC.dbKeyType texpr = return "DbConversions.dbKey()"
   | otherwise = case expNewtype texpr of
 
-      (Just (scopedname, innertype, [tparams])) -> do
+      (Just (scopedname, innertype, tparams)) -> do
         dbConvInnerType <- genDbConversionExpr1 cgp (AST.n_typeExpr innertype) fd
         return (template "DbConversions.newtype($2::getValue, $2::new, $1)" [dbConvInnerType, J.fd_boxedTypeExprStr fd])
 
