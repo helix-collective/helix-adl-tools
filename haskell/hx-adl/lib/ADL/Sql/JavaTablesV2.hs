@@ -21,11 +21,10 @@ import Data.Traversable(for)
 import Utils(toSnakeCase)
 
 generateJavaModelV2 :: JavaTableFlags -> J.CodeGenProfile -> J.JavaPackageFn -> J.CModule -> DBTable -> J.ClassFile
-generateJavaModelV2 jtflags cgp javaPackageFn mod dbtable@(_,_,_,dbTableAnnotation)  =
-  case getAnnotationField dbTableAnnotation "withIdPrimaryKey" of
-    (Just (JS.Bool True)) -> generateClassWithIdPrimaryKey jtflags cgp javaPackageFn mod dbtable
-    _ -> generateClass jtflags cgp javaPackageFn mod dbtable
-
+generateJavaModelV2 jtflags cgp javaPackageFn mod dbtable  =
+  if hasIdPrimaryKey dbtable
+     then generateClassWithIdPrimaryKey jtflags cgp javaPackageFn mod dbtable
+     else generateClass jtflags cgp javaPackageFn mod dbtable
 
 generateClassWithIdPrimaryKey :: JavaTableFlags -> J.CodeGenProfile -> J.JavaPackageFn -> J.CModule -> DBTable -> J.ClassFile
 generateClassWithIdPrimaryKey jtflags cgp javaPackageFn mod dbtable = execState gen state0
@@ -39,7 +38,7 @@ generateClassWithIdPrimaryKey jtflags cgp javaPackageFn mod dbtable = execState 
 
       J.addImport "au.com.helixta.adl.util.AdlTableWithId"
 
-      adlColumns <- mkAdlColumns cgp (SC.table_columns table) (AST.s_fields struct)
+      adlColumns <- mkAdlColumns cgp dbtable (SC.table_columns table) (AST.s_fields struct)
 
       J.addMethod
         (  ctemplate "private final AdlField<DbKey<$1>> id = f(\"id\", DbConversions.dbKey(), DbKey.jsonBinding($1.jsonBinding()));"
@@ -100,7 +99,7 @@ generateClass jtflags cgp javaPackageFn mod dbtable = execState gen state0
 
       J.addImport "au.com.helixta.adl.util.AdlTable"
 
-      adlColumns <- mkAdlColumns cgp (SC.table_columns table) (AST.s_fields struct)
+      adlColumns <- mkAdlColumns cgp dbtable (SC.table_columns table) (AST.s_fields struct)
 
       for_ adlColumns $ \dbc -> case dbc of
         (col,fd,jb,dbconv) -> do
@@ -238,8 +237,8 @@ genDbConversionExpr1 cgp texpr fd
 
 type AdlColumn = (SC.Column,J.FieldDetails,T.Text,T.Text)
 
-mkAdlColumns :: J.CodeGenProfile -> [SC.Column] -> [AST.Field J.CResolvedType] -> J.CState [AdlColumn]
-mkAdlColumns cgp columns fields = for (zip nonIdColumns fields) $ \(col, field) -> do
+mkAdlColumns :: J.CodeGenProfile -> DBTable -> [SC.Column] -> [AST.Field J.CResolvedType] -> J.CState [AdlColumn]
+mkAdlColumns cgp dbtable columns fields = for (zip explicitColumns fields) $ \(col, field) -> do
   fd <- J.genFieldDetails field
   jb <- J.genJsonBindingExpr cgp (AST.f_type (J.fd_field fd))
   dbconv <- case customDbHelpers col field of
@@ -250,4 +249,14 @@ mkAdlColumns cgp columns fields = for (zip nonIdColumns fields) $ \(col, field) 
          True -> return (template "DbConversions.nullable($1.dbConversion())" [helperClass])
   return (col,fd,jb,dbconv)
   where
-    nonIdColumns = filter (\col -> SC.column_name col /= "id") columns
+    explicitColumns = if hasIdPrimaryKey dbtable
+      then filter (\col -> SC.column_name col /= "id") columns
+      else columns
+
+hasIdPrimaryKey :: DBTable -> Bool
+hasIdPrimaryKey (_,_,_,dbTableAnnotation) =
+  case getAnnotationField dbTableAnnotation "withIdPrimaryKey" of
+    (Just (JS.Bool True)) -> True
+    _ -> False
+
+
