@@ -37,6 +37,8 @@ generateClassWithIdPrimaryKey jtflags cgp javaPackageFn mod dbtable = execState 
     gen = do
       generateClassCommon dbtable
 
+      J.addImport "au.com.helixta.adl.util.AdlTableWithId"
+
       adlColumns <- mkAdlColumns cgp (SC.table_columns table) (AST.s_fields struct)
 
       J.addMethod
@@ -96,6 +98,8 @@ generateClass jtflags cgp javaPackageFn mod dbtable = execState gen state0
     gen = do
       generateClassCommon dbtable
 
+      J.addImport "au.com.helixta.adl.util.AdlTable"
+
       adlColumns <- mkAdlColumns cgp (SC.table_columns table) (AST.s_fields struct)
 
       for_ adlColumns $ \dbc -> case dbc of
@@ -154,7 +158,6 @@ generateClassCommon dbtable  = do
   J.addImport "au.com.helixta.adl.common.db.DbKey"
   J.addImport "au.com.helixta.adl.common.db.WithDbId"
   J.addImport "au.com.helixta.adl.util.AdlField"
-  J.addImport "au.com.helixta.adl.util.AdlTableWithId"
   J.addImport "au.com.helixta.adl.util.DbConversions"
   J.addImport "au.com.helixta.nofrills.sql.Dsl"
   J.addImport "au.com.helixta.nofrills.sql.impl.DbResults"
