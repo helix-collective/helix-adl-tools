@@ -132,7 +132,7 @@ generateClass jtflags cgp javaPackageFn mod dbtable = execState gen state0
 
       J.addMethod
         (  cline "@Override"
-        <> cblock (template "public Map<Dsl.FieldRef, Object> dbMapping(DbKey<$1> id, $1 value)" [javaClassNameT])
+        <> cblock (template "public Map<Dsl.FieldRef, Object> dbMapping($1 value)" [javaClassNameT])
            (  cline "Map<Dsl.FieldRef, Object> result = new HashMap<>();"
            <> mconcat [ctemplate "result.put($1(), $1().toDb(value.$2()));" [J.fd_varName fd, J.fd_accessorName fd]
                       | (_,fd,_,_) <- adlColumns]
