@@ -6,3 +6,4 @@ dist
 /.doit*
 /typescript/hx-adl/node_modules
 /typescript/hx-adl/build
+.idea/
