@@ -132,7 +132,7 @@ async function generateSqlSchema(params: Params, loadedAdl: LoadedAdl, dbTables:
         comment: typeExprToStringUnscoped(f.typeExpr),
       });
       if (columnType.fkey) {
-        constraints.push(`alter table ${t.name} add constraint ${t.name}_${columnName}_fk foreign key (${columnName}) references ${quoteReservedName(columnType.fkey.table)}(${columnType.fkey.column});`);
+        constraints.push(`alter table ${quoteReservedName(t.name)} add constraint ${t.name}_${columnName}_fk foreign key (${columnName}) references ${quoteReservedName(columnType.fkey.table)}(${columnType.fkey.column});`);
       }
     }
 
