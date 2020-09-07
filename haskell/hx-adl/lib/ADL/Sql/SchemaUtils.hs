@@ -8,6 +8,7 @@ module ADL.Sql.SchemaUtils
   , typeExprReferences
   , instantType
   , localDateType
+  , localTimeType
   , localDateTimeType
   , postgresDbProfile
   , postgresDbProfileV2
@@ -357,6 +358,7 @@ dbKeyType = ScopedName (ModuleName ["common","db"]) "DbKey"
 pkType = ScopedName (ModuleName ["common","db"]) "PK"
 instantType = ScopedName (ModuleName ["common"]) "Instant"
 localDateType = ScopedName (ModuleName ["common"]) "LocalDate"
+localTimeType = ScopedName (ModuleName ["common"]) "LocalTime"
 localDateTimeType = ScopedName (ModuleName ["common"]) "LocalDateTime"
 geographyType = ScopedName (ModuleName ["common"]) "Geography"
 geographyGeoJsonType = ScopedName (ModuleName ["common"]) "GeographyGeoJson"
