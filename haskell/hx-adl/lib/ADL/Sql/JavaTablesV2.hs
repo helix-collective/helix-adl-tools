@@ -223,6 +223,7 @@ genDbConversionExpr1 cgp texpr fd
     return (template "DbConversions.dbEnum(s -> $1.fromString(s), e -> e.toString())" [typeExprStr])
   | SC.typeExprReferences SC.instantType texpr = return "DbConversions.INSTANT"
   | SC.typeExprReferences SC.localDateTimeType texpr = return "DbConversions.LOCAL_DATE_TIME"
+  | SC.typeExprReferences SC.localTimeType texpr = return "DbConversions.LOCAL_TIME"
   | SC.typeExprReferences SC.localDateType texpr = return "DbConversions.LOCAL_DATE"
   | SC.typeExprReferences SC.dbKeyType texpr = return "DbConversions.dbKey()"
   | otherwise = case expNewtype texpr of

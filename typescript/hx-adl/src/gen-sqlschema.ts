@@ -296,6 +296,8 @@ function getColumnType1(resolver: adl.DeclResolver, typeExpr: adlast.TypeExpr, d
         return "timestamp";
       } else if (scopedNamesEqual(dtype.refScopedName, LOCAL_DATE)) {
         return "date";
+      } else if (scopedNamesEqual(dtype.refScopedName, LOCAL_TIME)) {
+        return "time";
       } else if (scopedNamesEqual(dtype.refScopedName, LOCAL_DATETIME)) {
         return "timestamp";
       } else if (sdecl.decl.type_.kind == 'union_' && isEnum(sdecl.decl.type_.value)) {
@@ -508,5 +510,6 @@ const DB_COLUMN_TYPE = scopedName("common.db", "DbColumnType")
 const DB_KEY = scopedName("common.db", "DbKey")
 const INSTANT = scopedName("common", "Instant");
 const LOCAL_DATE = scopedName("common", "LocalDate");
+const LOCAL_TIME = scopedName("common", "LocalTime");
 const LOCAL_DATETIME = scopedName("common", "LocalDateTime");
 
