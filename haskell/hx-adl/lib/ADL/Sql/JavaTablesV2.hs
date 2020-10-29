@@ -87,6 +87,16 @@ generateClassWithIdPrimaryKey jtflags cgp javaPackageFn mod dbtable = execState 
            )
         )
 
+      J.addMethod
+        (  cline "@Override"
+        <> cblock (template "public Map<String, JsonElement> jsonDbMapping($1 value)" [javaClassNameT])
+           (  cline "HashMap<String, JsonElement> result = new HashMap<>();"
+           <> mconcat [ctemplate "result.put($1().field, $1().jsonBinding().toJson(value.$2()));" [J.fd_varName fd, J.fd_accessorName fd]
+                      | (_,fd,_,_) <- adlColumns]
+           <> cline "return result;"
+           )
+        )
+
 generateClass :: JavaTableFlags -> J.CodeGenProfile -> J.JavaPackageFn -> J.CModule -> DBTable -> J.ClassFile
 generateClass jtflags cgp javaPackageFn mod dbtable = execState gen state0
   where
@@ -140,6 +150,15 @@ generateClass jtflags cgp javaPackageFn mod dbtable = execState gen state0
            )
         )
 
+      J.addMethod
+        (  cline "@Override"
+        <> cblock (template "public Map<String, JsonElement> jsonDbMapping($1 value)" [javaClassNameT])
+           (  cline "Map<String, JsonElement> result = new HashMap<>();"
+           <> mconcat [ctemplate "result.put($1().field, $1().jsonBinding().toJson(value.$2()));" [J.fd_varName fd, J.fd_accessorName fd]
+                      | (_,fd,_,_) <- adlColumns]
+           <> cline "return result;"
+           )
+        )
 
 mkNames :: DBTable -> (T.Text,T.Text,T.Text,T.Text)
 mkNames (decl,struct,table,dbTableAnnotation) = (tableClassNameT,tableInstanceNameT,javaClassNameT,dbTableNameT)
@@ -168,6 +187,7 @@ generateClassCommon dbtable  = do
   J.addImport "java.util.List"
   J.addImport "java.util.HashMap"
   J.addImport "java.util.Map"
+  J.addImport "com.google.gson.JsonElement"
 
   J.addMethod (ctemplate "public static final $1 $2 = new $1();" [tableClassNameT, tableInstanceNameT])
 
