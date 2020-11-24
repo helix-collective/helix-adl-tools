@@ -161,7 +161,7 @@ async function generateTypescriptService(params: {
   code.add('import { GetFn, PostFn } from "@adltools/service/types";');
   code.add('import { HttpFetch } from "@hx/hx/service/http";');
   code.add("");
-  code.add('import { DeclResolver } from "../adl-gen/runtime/adl";');
+  code.add(`import { DeclResolver } from "${adlgendirrel}/runtime/adl";`);
   code.add("");
 
   // generating the service class:
