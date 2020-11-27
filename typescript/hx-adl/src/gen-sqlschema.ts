@@ -20,6 +20,7 @@ export function configureCli(program: Command) {
    .option('--postgres-v2', 'Generate sql for postgres (model version 2)')
    .option('--mssql', 'Generate sql for microsoft sqlserver')
    .option('--extension <ext>', 'Add to included sql extensions', collect, [])
+   .option('--sqlmigration', 'Generate sql for migration')
    .description('Generate a db schema from ADL files')
    .action( (adlFiles:string[], cmd:{}) => {
      const adlSearchPath: string[] = cmd['searchdir'];
