@@ -20,6 +20,7 @@ export function configureCli(program: Command) {
    .option('--postgres-v2', 'Generate sql for postgres (model version 2)')
    .option('--mssql', 'Generate sql for microsoft sqlserver')
    .option('--extension <ext>', 'Add to included sql extensions', collect, [])
+   .option('--migration', 'Generate sql for migration')
    .description('Generate a db schema from ADL files')
    .action( (adlFiles:string[], cmd:{}) => {
      const adlSearchPath: string[] = cmd['searchdir'];
@@ -100,7 +101,6 @@ async function generateSqlSchema(params: Params, loadedAdl: LoadedAdl, dbTables:
   const moduleNames : Set<string> = new Set(dbTables.map(dbt => dbt.scopedDecl.moduleName));
   writer.write( `-- Schema auto-generated from adl modules: ${Array.from(moduleNames.keys()).join(', ')}\n` );
   writer.write( `--\n` );
-  writer.write( `-- column comments show original ADL types\n` );
 
   if (params.extensions.length > 0) {
     writer.write('\n');
@@ -161,20 +161,18 @@ async function generateSqlSchema(params: Params, loadedAdl: LoadedAdl, dbTables:
     }
 
 
+    writer.write("begin;");
+    writer.write("-- create tables");
+    writer.write( `create table if not exists ${quoteReservedName(t.name)} ();`);
     writer.write('\n');
-    writer.write( `create table ${quoteReservedName(t.name)}(\n` );
+    writer.write("-- create columns");
     for(let i = 0; i < lines.length; i++) {
       let line = lines[i].code;
       if (i < lines.length-1) {
-        line += ',';
+        line = `alter table ${quoteReservedName(t.name)} add column if not exists ${line};`;
+        writer.write('  ' + line + '\n');
       }
-      if (lines[i].comment) {
-        line = line.padEnd(36, ' ');
-        line = line + " -- " + lines[i].comment;
-      }
-      writer.write('  ' + line + '\n');
     }
-    writer.write( `);\n` );
     allExtraSql = allExtraSql.concat(extraSql);
   }
 
