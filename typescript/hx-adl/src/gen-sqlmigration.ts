@@ -10,7 +10,7 @@ import { snakeCase } from "change-case";
 
 export function configureCli(program: Command) {
   program
-   .command("sql [adlFiles...]")
+   .command("sql-migration [adlFiles...]")
    .option('-I, --searchdir <path>', 'Add to adl searchpath', collect, [])
    .option('--outfile <path>', 'the resulting sql file', 'create.sql')
    .option('--outputdir <dir>', 'the directory into which the sql is written (deprecated)')
