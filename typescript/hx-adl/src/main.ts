@@ -1,4 +1,5 @@
 import program from "commander";
+import * as sqlmigration from "./gen-sqlmigration";
 import * as sqlschema from "./gen-sqlschema";
 import * as javatables from "./gen-javatables";
 import * as javahttpreqs from "./gen-javahttpreqs";
@@ -9,6 +10,7 @@ import * as openapi from "./gen-openapi";
 
 program.name("hx-adl");
 program.version("1.0.0");
+sqlmigration.configureCli(program);
 sqlschema.configureCli(program);
 javatables.configureCli(program);
 javahttpreqs.configureCli(program);

@@ -10,15 +10,12 @@ import { snakeCase } from "change-case";
 
 export function configureCli(program: Command) {
   program
-   .command("sql [adlFiles...]")
+   .command("sql-migration [adlFiles...]")
    .option('-I, --searchdir <path>', 'Add to adl searchpath', collect, [])
    .option('--outfile <path>', 'the resulting sql file', 'create.sql')
    .option('--outputdir <dir>', 'the directory into which the sql is written (deprecated)')
    .option('--outmetadata <path>', 'sql to insert the model metadata')
    .option('--outtemplatesql <paths>', 'generate extra sql from a mustache template', collect, [])
-   .option('--postgres', 'Generate sql for postgres')
-   .option('--postgres-v2', 'Generate sql for postgres (model version 2)')
-   .option('--mssql', 'Generate sql for microsoft sqlserver')
    .option('--extension <ext>', 'Add to included sql extensions', collect, [])
    .option('--migration', 'Generate sql for migration')
    .description('Generate a db schema from ADL files')
