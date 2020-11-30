@@ -1,6 +1,7 @@
 import program from "commander";
 import * as sqlmigration from "./gen-sqlmigration";
 import * as sqlschema from "./gen-sqlschema";
+import * as sqlmigration from "./gen-sqlmigration";
 import * as javatables from "./gen-javatables";
 import * as javahttpreqs from "./gen-javahttpreqs";
 import * as typescripthttpreqs from "./gen-typescripthttpreqs";
@@ -12,6 +13,7 @@ program.name("hx-adl");
 program.version("1.0.0");
 sqlmigration.configureCli(program);
 sqlschema.configureCli(program);
+sqlmigration.configureCli(program);
 javatables.configureCli(program);
 javahttpreqs.configureCli(program);
 typescripthttpreqs.configureCli(program);
