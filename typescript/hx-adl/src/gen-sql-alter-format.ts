@@ -127,8 +127,14 @@ async function generateSqlSchema(params: Params, loadedAdl: LoadedAdl, dbTables:
     const extraSql: string[] = t.ann && t.ann['extraSql'] || [];
 
     const lines: {code:string, comment?:string}[] = [];
+    const pkLines: string[] = [];
+
     if (withIdPrimaryKey) {
       lines.push({code: `id ${params.dbProfile.idColumnType} not null`});
+      pkLines.push(`alter table ${quoteReservedName(t.name)} add primary key(id)`);
+    } else if (withPrimaryKey.length > 0) {
+      const cols = withPrimaryKey.map(findColName);
+      pkLines.push(`alter table ${quoteReservedName(t.name)} add primary key(${cols.join(',')})`);
     }
     for(const f of t.struct.value.fields) {
       const columnName = getColumnName(f);
@@ -160,10 +166,10 @@ async function generateSqlSchema(params: Params, loadedAdl: LoadedAdl, dbTables:
       constraints.push(`alter table ${quoteReservedName(t.name)} add constraint ${t.name}_${i+1}_con unique (${cols.join(', ')});`);
     }
     if (withIdPrimaryKey) {
-      lines.push({code:'primary key(id)'});
+      lines.push({code:`alter table ${quoteReservedName(t.name)} add primary key(id);`});
     } else if (withPrimaryKey.length > 0) {
       const cols = withPrimaryKey.map(findColName);
-      lines.push({code:`primary key(${cols.join(',')})`});
+      lines.push({code:`alter table ${quoteReservedName(t.name)} add primary key(${cols.join(',')});`});
     }
 
     writer.write('\n');
@@ -177,6 +183,12 @@ async function generateSqlSchema(params: Params, loadedAdl: LoadedAdl, dbTables:
         line = `alter table ${quoteReservedName(t.name)} add column if not exists ${line};`;
         writer.write('  ' + line + '\n');
       }
+    }
+
+    for(let i = 0; i < pkLines.length; i++) {
+      let line = pkLines[i];
+      line = `${line};`;
+      writer.write('  ' + line + '\n');
     }
     allExtraSql = allExtraSql.concat(extraSql);
   }
