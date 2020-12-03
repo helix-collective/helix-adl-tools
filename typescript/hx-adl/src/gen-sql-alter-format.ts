@@ -109,7 +109,8 @@ async function generateSqlSchema(params: Params, loadedAdl: LoadedAdl, dbTables:
     });
   }
 
-  const collectSetNotNullLines: string[] = [];
+
+  const collectSetNotNullLines: {table: string, cols: string[]}[] = [];
   const constraints: string[] = [];
   let allExtraSql: string[] = [];
 
@@ -130,13 +131,14 @@ async function generateSqlSchema(params: Params, loadedAdl: LoadedAdl, dbTables:
     const lines: {code:string, comment?:string}[] = [];
     // collect columns from tables that need to be set as the primary key
     const pkLines: string[] = [];
-    // collect columns from tables that need to be set as not null
-    const collectNotNullLines: {code:string}[] = [];
+
+    const notNullCols: string[] = []
+    collectSetNotNullLines.push({table: t.name, cols: notNullCols})
 
     if (withIdPrimaryKey) {
       lines.push({code: `id ${params.dbProfile.idColumnType}`});
       pkLines.push(`alter table ${quoteReservedName(t.name)} add primary key(id)`);
-      collectNotNullLines.push({code: 'id'});
+      notNullCols.push('id');
     } else if (withPrimaryKey.length > 0) {
       const cols = withPrimaryKey.map(findColName);
       pkLines.push(`alter table ${quoteReservedName(t.name)} add primary key(${cols.join(',')})`);
@@ -149,9 +151,7 @@ async function generateSqlSchema(params: Params, loadedAdl: LoadedAdl, dbTables:
         comment: typeExprToStringUnscoped(f.typeExpr),
       });
       if (columnType.notNullable) {
-        collectNotNullLines.push({
-          code: `${columnName}`,
-        });
+        notNullCols.push(columnName);
       }
       if (columnType.fkey) {
         constraints.push(`alter table ${quoteReservedName(t.name)} add constraint ${t.name}_${columnName}_fk foreign key (${columnName}) references ${quoteReservedName(columnType.fkey.table)}(${columnType.fkey.column});`);
@@ -185,39 +185,36 @@ async function generateSqlSchema(params: Params, loadedAdl: LoadedAdl, dbTables:
     writer.write('\n' + '-- create table' + '\n');
     writer.write(`create table if not exists ${quoteReservedName(t.name)} ();` + '\n');
 
-    writer.write('  ' + '-- add columns' + '\n');
+    writer.write('-- add columns' + '\n');
     for(let i = 0; i < lines.length; i++) {
       let line = lines[i].code;
       if (i < lines.length-1) {
         line = `alter table ${quoteReservedName(t.name)} add column if not exists ${line};`;
-        writer.write('  ' + line + '\n');
+        writer.write(line + '\n');
       }
     }
 
-    writer.write('  ' + '-- set primary key' + '\n');
+    writer.write('-- set primary key' + '\n');
     for(let i = 0; i < pkLines.length; i++) {
       let line = pkLines[i];
       line = `${line};`;
-      writer.write('  ' + line + '\n');
+      writer.write(line + '\n');
     }
 
-    for(let i = 0; i < setNotNullLines.length; i++) {
-      let line = setNotNullLines[i].code;
-      if (i < setNotNullLines.length) {
-        line = `alter table ${quoteReservedName(t.name)} alter column ${line} set not null;`;
-        collectSetNotNullLines.push('  ' + line + '\n');
-      }
-    }
     allExtraSql = allExtraSql.concat(extraSql);
   }
 
   writer.write('\n' + '-- vv START MANUAL CODE FOR MIGRATION' + '\n');
   writer.write('\n' + '-- ^^ END MANUAL CODE FOR MIGRATION' + '\n');
+
   writer.write('\n' + '-- update columns for set null value' + '\n');
-  for(let i = 0; i < collectSetNotNullLines.length; i++) {
-    writer.write(collectSetNotNullLines[i]);
+  for (const table of collectSetNotNullLines) {
+    for (const col of table.cols) {
+      writer.write(`alter table ${quoteReservedName(table.table)} alter column ${col} set not null;\n`)
+    }
+    writer.write('\n');
   }
-  writer.write('\n' + '-- uncomment -- commit; to run sql queries inside a transation' + '\n');
+  writer.write('\n' + '-- uncomment -- commit; to run sql queries inside a transaction' + '\n');
   writer.write('-- commit;' + '\n');
 
   if(constraints.length > 0) {
