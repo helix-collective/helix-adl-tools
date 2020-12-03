@@ -131,12 +131,12 @@ async function generateSqlSchema(params: Params, loadedAdl: LoadedAdl, dbTables:
     // collect columns from tables that need to be set as the primary key
     const pkLines: string[] = [];
     // collect columns from tables that need to be set as not null
-    const setNotNullLines: {code:string}[] = [];
+    const collectNotNullLines: {code:string}[] = [];
 
     if (withIdPrimaryKey) {
       lines.push({code: `id ${params.dbProfile.idColumnType}`});
       pkLines.push(`alter table ${quoteReservedName(t.name)} add primary key(id)`);
-      setNotNullLines.push({code: 'id'});
+      collectNotNullLines.push({code: 'id'});
     } else if (withPrimaryKey.length > 0) {
       const cols = withPrimaryKey.map(findColName);
       pkLines.push(`alter table ${quoteReservedName(t.name)} add primary key(${cols.join(',')})`);
@@ -148,9 +148,11 @@ async function generateSqlSchema(params: Params, loadedAdl: LoadedAdl, dbTables:
         code: `${columnName} ${columnType.sqltype}`,
         comment: typeExprToStringUnscoped(f.typeExpr),
       });
-      setNotNullLines.push({
-        code: `${columnName}`,
-      });
+      if (columnType.notNullable) {
+        collectNotNullLines.push({
+          code: `${columnName}`,
+        });
+      }
       if (columnType.fkey) {
         constraints.push(`alter table ${quoteReservedName(t.name)} add constraint ${t.name}_${columnName}_fk foreign key (${columnName}) references ${quoteReservedName(columnType.fkey.table)}(${columnType.fkey.column});`);
       }
@@ -292,13 +294,14 @@ interface ColumnType {
     table: string,
     column: string
   };
+  notNullable: boolean;
 };
 
 
 function getColumnType(resolver: adl.DeclResolver, field: adlast.Field,  dbProfile: DbProfile): ColumnType {
   const ann = getAnnotation(field.annotations, DB_COLUMN_TYPE);
   const annctype: string | undefined = typeof ann === "string" ? ann : undefined;
-  
+
   const typeExpr = field.typeExpr;
 
   // For Maybe<T> and Nullable<T> the sql column will allow nulls
@@ -308,14 +311,16 @@ function getColumnType(resolver: adl.DeclResolver, field: adlast.Field,  dbProfi
     ) {
     return {
       sqltype: annctype || getColumnType1(resolver, typeExpr.parameters[0], dbProfile),
-      fkey: getForeignKeyRef(resolver, typeExpr.parameters[0])
+      fkey: getForeignKeyRef(resolver, typeExpr.parameters[0]),
+      notNullable: false,
     };
   }
 
   // For all other types, the column will not allow nulls
   return {
     sqltype: (annctype || getColumnType1(resolver, typeExpr, dbProfile)),
-    fkey: getForeignKeyRef(resolver, typeExpr)
+    fkey: getForeignKeyRef(resolver, typeExpr),
+    notNullable: true,
   };
 }
 
