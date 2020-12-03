@@ -118,6 +118,8 @@ async function generateSqlSchema(params: Params, loadedAdl: LoadedAdl, dbTables:
   writer.write("-- begin;");
   writer.write('\n');
 
+  const collectSetNotNullLines: string[] = [];
+
   // Output the tables
   for(const t of dbTables) {
     const withIdPrimaryKey: boolean  = t.ann && t.ann['withIdPrimaryKey'] || false;
@@ -127,11 +129,17 @@ async function generateSqlSchema(params: Params, loadedAdl: LoadedAdl, dbTables:
     const extraSql: string[] = t.ann && t.ann['extraSql'] || [];
 
     const lines: {code:string, comment?:string}[] = [];
+
+    // collect columns from tables that need to be set as the primary key
     const pkLines: string[] = [];
 
+    // collect columns from tables that need to be set as not null
+  const setNotNullLines: {code:string}[] = [];
+
     if (withIdPrimaryKey) {
-      lines.push({code: `id ${params.dbProfile.idColumnType} not null`});
+      lines.push({code: `id ${params.dbProfile.idColumnType}`});
       pkLines.push(`alter table ${quoteReservedName(t.name)} add primary key(id)`);
+      setNotNullLines.push({code: 'id'});
     } else if (withPrimaryKey.length > 0) {
       const cols = withPrimaryKey.map(findColName);
       pkLines.push(`alter table ${quoteReservedName(t.name)} add primary key(${cols.join(',')})`);
@@ -142,6 +150,9 @@ async function generateSqlSchema(params: Params, loadedAdl: LoadedAdl, dbTables:
       lines.push({
         code: `${columnName} ${columnType.sqltype}`,
         comment: typeExprToStringUnscoped(f.typeExpr),
+      });
+      setNotNullLines.push({
+        code: `${columnName}`,
       });
       if (columnType.fkey) {
         constraints.push(`alter table ${quoteReservedName(t.name)} add constraint ${t.name}_${columnName}_fk foreign key (${columnName}) references ${quoteReservedName(columnType.fkey.table)}(${columnType.fkey.column});`);
@@ -172,11 +183,9 @@ async function generateSqlSchema(params: Params, loadedAdl: LoadedAdl, dbTables:
       lines.push({code:`alter table ${quoteReservedName(t.name)} add primary key(${cols.join(',')});`});
     }
 
-    writer.write('\n');
-    writer.write("-- create table");
-    writer.write('\n');
-    writer.write( `create table if not exists ${quoteReservedName(t.name)} ();`);
-    writer.write('\n');
+    writer.write('\n' + '-- create table' + '\n');
+    writer.write(`create table if not exists ${quoteReservedName(t.name)} ();` + '\n');
+    writer.write('  ' + '-- add columns' + '\n');
     for(let i = 0; i < lines.length; i++) {
       let line = lines[i].code;
       if (i < lines.length-1) {
@@ -184,25 +193,36 @@ async function generateSqlSchema(params: Params, loadedAdl: LoadedAdl, dbTables:
         writer.write('  ' + line + '\n');
       }
     }
-
+    writer.write('  ' + '-- set primary key' + '\n');
     for(let i = 0; i < pkLines.length; i++) {
       let line = pkLines[i];
       line = `${line};`;
       writer.write('  ' + line + '\n');
     }
+    
+    for(let i = 0; i < setNotNullLines.length; i++) {
+      let line = setNotNullLines[i].code;
+      if (i < setNotNullLines.length) {
+        line = `alter table ${quoteReservedName(t.name)} alter column ${line} set not null;`;
+        // writer.write('  ' + line + '\n');
+        collectSetNotNullLines.push('  ' + line + '\n');
+      }
+    }
     allExtraSql = allExtraSql.concat(extraSql);
   }
 
-  writer.write('\n');
-  writer.write("-- uncomment -- commit; to run sql queries inside a transation");
-  writer.write('\n');
-  writer.write("-- commit;");
-  writer.write('\n');
+  writer.write('\n' + '-- vv START MANUAL CODE FOR MIGRATION' + '\n');
+  writer.write('\n' + '-- ^^ END MANUAL CODE FOR MIGRATION' + '\n');
+  writer.write('\n' + '-- update columns for set null value' + '\n');
+  for(let i = 0; i < collectSetNotNullLines.length; i++) {
+    writer.write(collectSetNotNullLines[i]);
+  }
+  writer.write('\n' + '-- uncomment -- commit; to run sql queries inside a transation' + '\n');
+  writer.write('-- commit;' + '\n');
 
   if(constraints.length > 0) {
     writer.write('\n');
   }
-
   for(const constraint of constraints) {
     writer.write(constraint + '\n');
   }
@@ -210,7 +230,6 @@ async function generateSqlSchema(params: Params, loadedAdl: LoadedAdl, dbTables:
   if(allExtraSql.length > 0) {
     writer.write('\n');
   }
-
   // And any sql
   for(const sql of allExtraSql) {
     writer.write(sql + '\n');
@@ -297,7 +316,7 @@ function getColumnType(resolver: adl.DeclResolver, field: adlast.Field,  dbProfi
 
   // For all other types, the column will not allow nulls
   return {
-    sqltype: (annctype || getColumnType1(resolver, typeExpr, dbProfile)) + " not null",
+    sqltype: (annctype || getColumnType1(resolver, typeExpr, dbProfile)),
     fkey: getForeignKeyRef(resolver, typeExpr)
   };
 }
