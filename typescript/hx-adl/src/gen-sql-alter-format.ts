@@ -109,6 +109,7 @@ async function generateSqlSchema(params: Params, loadedAdl: LoadedAdl, dbTables:
     });
   }
 
+  const collectSetNotNullLines: string[] = [];
   const constraints: string[] = [];
   let allExtraSql: string[] = [];
 
@@ -117,8 +118,6 @@ async function generateSqlSchema(params: Params, loadedAdl: LoadedAdl, dbTables:
   writer.write('\n');
   writer.write("-- begin;");
   writer.write('\n');
-
-  const collectSetNotNullLines: string[] = [];
 
   // Output the tables
   for(const t of dbTables) {
@@ -129,12 +128,10 @@ async function generateSqlSchema(params: Params, loadedAdl: LoadedAdl, dbTables:
     const extraSql: string[] = t.ann && t.ann['extraSql'] || [];
 
     const lines: {code:string, comment?:string}[] = [];
-
     // collect columns from tables that need to be set as the primary key
     const pkLines: string[] = [];
-
     // collect columns from tables that need to be set as not null
-  const setNotNullLines: {code:string}[] = [];
+    const setNotNullLines: {code:string}[] = [];
 
     if (withIdPrimaryKey) {
       lines.push({code: `id ${params.dbProfile.idColumnType}`});
@@ -185,6 +182,7 @@ async function generateSqlSchema(params: Params, loadedAdl: LoadedAdl, dbTables:
 
     writer.write('\n' + '-- create table' + '\n');
     writer.write(`create table if not exists ${quoteReservedName(t.name)} ();` + '\n');
+
     writer.write('  ' + '-- add columns' + '\n');
     for(let i = 0; i < lines.length; i++) {
       let line = lines[i].code;
@@ -193,18 +191,18 @@ async function generateSqlSchema(params: Params, loadedAdl: LoadedAdl, dbTables:
         writer.write('  ' + line + '\n');
       }
     }
+
     writer.write('  ' + '-- set primary key' + '\n');
     for(let i = 0; i < pkLines.length; i++) {
       let line = pkLines[i];
       line = `${line};`;
       writer.write('  ' + line + '\n');
     }
-    
+
     for(let i = 0; i < setNotNullLines.length; i++) {
       let line = setNotNullLines[i].code;
       if (i < setNotNullLines.length) {
         line = `alter table ${quoteReservedName(t.name)} alter column ${line} set not null;`;
-        // writer.write('  ' + line + '\n');
         collectSetNotNullLines.push('  ' + line + '\n');
       }
     }
