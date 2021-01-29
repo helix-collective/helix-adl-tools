@@ -284,8 +284,8 @@ export function monomorphicName(declName: string, typeParams: adlast.TypeExpr[])
  */
 export function getAnnotation(annotations: adlast.Annotations, annotationType: adlast.ScopedName): {}|null|undefined {
   for(const ann of annotations) {
-    if (scopedNamesEqual(ann.v1, annotationType)) {
-      return ann.v2;
+    if (scopedNamesEqual(ann.key, annotationType)) {
+      return ann.value;
     }
   }
   return undefined;

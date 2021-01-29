@@ -43,8 +43,8 @@ interface Annotable {
 function getComment(item: Annotable) : string|null {
   let comment: string | null = null;
   for (const anno of item.annotations) {
-    if (anno.v1.name === "Doc") {
-      comment = anno.v2 as string;
+    if (anno.key.name === "Doc") {
+      comment = anno.value as string;
       comment = comment.replace(/\n/g, " ");
       comment = comment.trim();
     }
