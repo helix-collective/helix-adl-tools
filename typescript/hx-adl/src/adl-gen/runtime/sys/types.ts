@@ -53,23 +53,23 @@ export interface MaybeOpts<T> {
 
 export function makeMaybe<T, K extends keyof MaybeOpts<T>>(kind: K, value: MaybeOpts<T>[K]) { return {kind, value}; }
 
-export interface Error_Value<T> {
-  kind: 'value';
+export interface Result_Ok<T, _E> {
+  kind: 'ok';
   value: T;
 }
-export interface Error_Error<_T> {
+export interface Result_Error<_T, E> {
   kind: 'error';
-  value: string;
+  value: E;
 }
 
-export type Error<T> = Error_Value<T> | Error_Error<T>;
+export type Result<T, E> = Result_Ok<T, E> | Result_Error<T, E>;
 
-export interface ErrorOpts<T> {
-  value: T;
-  error: string;
+export interface ResultOpts<T, E> {
+  ok: T;
+  error: E;
 }
 
-export function makeError<T, K extends keyof ErrorOpts<T>>(kind: K, value: ErrorOpts<T>[K]) { return {kind, value}; }
+export function makeResult<T, E, K extends keyof ResultOpts<T, E>>(kind: K, value: ResultOpts<T, E>[K]) { return {kind, value}; }
 
 export interface MapEntry<K, V> {
   key: K;
@@ -88,6 +88,6 @@ export function makeMapEntry<K, V>(
   };
 }
 
-export type Map<K, V> = Pair<K, V>[];
+export type Map<K, V> = MapEntry<K, V>[];
 
 export type Set<T> = T[];
