@@ -535,7 +535,7 @@ function generateTemplate(template: Template, dbtables: DbTable[]) {
       const attributes: { [key: string]: {} | null } = {};
       attributes['tablename'] = dbtable.name;
       for (const annotation of dbtable.scopedDecl.decl.annotations) {
-        attributes[annotation.v1.name] = annotation.v2;
+        attributes[annotation.key.name] = annotation.value;
       }
       return attributes;
     }),
