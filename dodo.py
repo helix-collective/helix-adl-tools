@@ -138,6 +138,8 @@ def task_install_release():
     def install_release(asversion, force):
         platform = sys.platform
         if platform.startswith('linux'):
+            removeDevDirCache=Path(os.environ["HOME"])/".cache"/"hxadl"/"dev"
+            shutil.rmtree(removeDevDirCache)
             cachedir=Path(os.environ["HOME"])/".cache"/"hxadl"
         elif platform.startswith('darwin'):
             cachedir=Path(os.environ["HOME"])/"Library"/"Caches"/"hxadl"
