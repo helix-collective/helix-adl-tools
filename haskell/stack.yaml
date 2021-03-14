@@ -1,8 +1,6 @@
 flags: {}
-resolver: lts-13.26
+resolver: lts-17.5
 packages:
 - hx-adl
-- adl/haskell/utils
 - adl/haskell/runtime
-- adl/haskell/compiler-lib
 - adl/haskell/compiler
