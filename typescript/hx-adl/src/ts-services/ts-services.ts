@@ -1,10 +1,13 @@
-import { camelCase } from "change-case";
-import { Command } from "commander";
-import { Annotations, Decl, Field, makeScopedDecl, ScopedDecl, TypeExpr } from "../adl-gen/runtime/sys/adlast";
-import { collect, parseAdl } from "../util";
-import { CodeGen } from "./code-gen";
-import { ImportingHelper } from "./import-helper";
+import { camelCase } from 'change-case';
+import { Command } from 'commander';
 import * as fsx from 'fs-extra';
+
+import {
+  Annotations, Decl, Field, makeScopedDecl, ScopedDecl, TypeExpr
+} from '../adl-gen/runtime/sys/adlast';
+import { collect, parseAdl } from '../util';
+import { CodeGen } from './code-gen';
+import { ImportingHelper } from './import-helper';
 
 export function configureCli(program: Command) {
   program
@@ -17,13 +20,13 @@ export function configureCli(program: Command) {
     .option('--serviceclass <str>', 'Class name for the service', 'AppService')
 
     .description('Generate a typescript API service class file.')
-    .action( (adlFiles:string[], cmd:{}) => {
-      const adlSearchPath : string[] = cmd["searchdir"];
-      const outfile : string = cmd["outfile"];
-      const apimodule : string = cmd["apimodule"];
-      const apiname : string = cmd["apiname"];
-      const adlgendirrel : string = cmd["adlgendirrel"];
-      const serviceclass : string = cmd["serviceclass"];
+    .action((adlFiles: string[], cmd: {}) => {
+      const adlSearchPath: string[] = cmd["searchdir"];
+      const outfile: string = cmd["outfile"];
+      const apimodule: string = cmd["apimodule"];
+      const apiname: string = cmd["apiname"];
+      const adlgendirrel: string = cmd["adlgendirrel"];
+      const serviceclass: string = cmd["serviceclass"];
       generateTypescriptService({
         adlSearchPath,
         outfile,
@@ -33,14 +36,14 @@ export function configureCli(program: Command) {
         adlgendirrel,
         serviceclass
       });
-   });
+    });
 }
 
 interface Annotable {
   annotations: Annotations;
 }
 
-function getComment(item: Annotable) : string|null {
+function getComment(item: Annotable): string | null {
   let comment: string | null = null;
   for (const anno of item.annotations) {
     if (anno.key.name === "Doc") {
@@ -61,15 +64,15 @@ async function generateTypescriptService(params: {
   adlgendirrel: string;
   serviceclass: string
 }) {
-  const {adlSearchPath, outfile, apimodule, apiname, adlFiles, adlgendirrel, serviceclass} = params;
+  const { adlSearchPath, outfile, apimodule, apiname, adlFiles, adlgendirrel, serviceclass } = params;
 
   // Load the ADL based upon command line arguments
   const loadedAdl = await parseAdl(adlFiles, adlSearchPath);
 
   const apistructSn = `${apimodule}.${apiname}`;
 
-  const apiRequests : ScopedDecl|undefined = loadedAdl.allAdlDecls[apistructSn];
-  if(apiRequests===undefined) {
+  const apiRequests: ScopedDecl | undefined = loadedAdl.allAdlDecls[apistructSn];
+  if (apiRequests === undefined) {
     throw new Error(`Scoped name not found: ${apistructSn}`);
   }
   if (apiRequests.decl.type_.kind !== "struct_") {
@@ -77,7 +80,7 @@ async function generateTypescriptService(params: {
   }
   const apiRequestsStruct = apiRequests.decl.type_.value;
 
-  const apiReqsTypeExpr : TypeExpr = {
+  const apiReqsTypeExpr: TypeExpr = {
     typeRef: {
       kind: 'reference',
       value: {
@@ -147,7 +150,7 @@ async function generateTypescriptService(params: {
   importingHelper.modulesImports.forEach((imports_: Set<string>, module: string) => {
     const importedModuleFrom = `${adlgendirrel}/${module.replace(/\./g, "/")}`;
 
-    const modImports : string[] = [];
+    const modImports: string[] = [];
     for (const imp_ of Array.from(imports_)) {
       modImports.push(imp_);
     }
@@ -166,7 +169,7 @@ async function generateTypescriptService(params: {
 
   // generating the service class:
   const comment = getComment(apiRequests.decl);
-  if(comment) {
+  if (comment) {
     code.add(`/** ${comment} */`);
   }
   code.add(`export class ${serviceclass} extends HttpServiceBase {`);
@@ -189,7 +192,7 @@ async function generateTypescriptService(params: {
       const responseType = apiEntry.typeExpr.parameters[1];
 
       const comment = getComment(apiEntry);
-      if(comment) {
+      if (comment) {
         classBody.add(`/** ${comment} */`);
       }
       classBody.add(
@@ -206,7 +209,7 @@ async function generateTypescriptService(params: {
       const responseType = apiEntry.typeExpr.parameters[0];
 
       const comment = getComment(apiEntry);
-      if(comment) {
+      if (comment) {
         classBody.add(`/** ${comment} */`);
       }
       classBody.add(`${camelCase("get " + apiEntry.name)}: GetFn<${importingHelper.asReferencedName(responseType)}>;`);
@@ -219,7 +222,7 @@ async function generateTypescriptService(params: {
       const responseType = apiEntry.typeExpr.parameters[0];
 
       const comment = getComment(apiEntry);
-      if(comment) {
+      if (comment) {
         classBody.add(`/** ${comment} */`);
       }
       classBody.add(
