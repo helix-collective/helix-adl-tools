@@ -2,10 +2,8 @@ import { camelCase } from 'change-case';
 import { Command } from 'commander';
 import * as fsx from 'fs-extra';
 
-import {
-  Annotations, Decl, Field, makeScopedDecl, ScopedDecl, TypeExpr
-} from '../adl-gen/runtime/sys/adlast';
-import { collect, parseAdl } from '../util';
+import { Annotations, ScopedDecl, TypeExpr } from '../adl-gen/runtime/sys/adlast';
+import { collect, LoadedAdl, parseAdl } from '../util';
 import { CodeGen } from './code-gen';
 import { ImportingHelper } from './import-helper';
 
@@ -55,6 +53,134 @@ function getComment(item: Annotable): string | null {
   return comment;
 }
 
+type CodeGenType = "collect" | "decl" | "ctor" | "impl";
+
+function addCode(importingHelper: ImportingHelper, loadedAdl: LoadedAdl, codeGenType: CodeGenType, codeGen: CodeGen, typeExpr: TypeExpr, name: string, comment: string | null) {
+  if (typeExpr.typeRef.kind !== "reference") {
+    throw new Error("Unexpected - typeExpr.typeRef.kind !== reference");
+  }
+  if (typeExpr.typeRef.value.name === "HttpPost") {
+    if (typeExpr.parameters.length !== 2) {
+      throw new Error("Unexpected - typeExpr.parameters.length != 2");
+    }
+    const requestType = typeExpr.parameters[0];
+    const responseType = typeExpr.parameters[1];
+    switch (codeGenType) {
+      case "collect": {
+        importingHelper.addType(requestType);
+        importingHelper.addType(responseType);
+        return;
+      }
+      case "decl": {
+        if (comment) {
+          codeGen.add(`/** ${comment} */`);
+        }
+        codeGen.add(
+          `${camelCase("post " + name)}: PostFn<${importingHelper.asReferencedName(
+            requestType
+          )}, ${importingHelper.asReferencedName(responseType)}>;`
+        );
+        codeGen.add("");
+        return;
+      }
+      case "ctor": {
+        codeGen.add(`this.${camelCase("post " + name)} = this.mkPostFn(api.${name});`);
+        return;
+      }
+      case "impl": {
+        codeGen.add("");
+        if (comment) {
+          codeGen.add(`/** ${comment} */`);
+        }
+
+        codeGen.add(
+          `async ${name}(req: ${importingHelper.asReferencedName(
+            requestType
+          )}): Promise<${importingHelper.asReferencedName(responseType)}> {`
+        );
+        codeGen.add(`  return this.${camelCase("post " + name)}.call(req);`);
+        codeGen.add(`}`);
+        return;
+      }
+    }
+  }
+  if (typeExpr.typeRef.value.name === "HttpGet") {
+    if (typeExpr.parameters.length !== 1) {
+      throw new Error("Unexpected - typeExpr.parameters.length != 1");
+    }
+    const responseType = typeExpr.parameters[0];
+    switch (codeGenType) {
+      case "collect": {
+        importingHelper.addType(responseType);
+        return;
+      }
+      case "decl": {
+        if (comment) {
+          codeGen.add(`/** ${comment} */`);
+        }
+        codeGen.add(`${camelCase("get " + name)}: GetFn<${importingHelper.asReferencedName(responseType)}>;`);
+        codeGen.add("");
+        return;
+      }
+      case "ctor": {
+        codeGen.add(`this.${camelCase("get " + name)} = this.mkGetFn(api.${name});`);
+        return;
+      }
+      case "impl": {
+        codeGen.add("");
+        if (comment) {
+          codeGen.add(`/** ${comment} */`);
+        }
+        codeGen.add(`async ${name}(): Promise<${importingHelper.asReferencedName(responseType)}> {`);
+        codeGen.add(`  return this.${camelCase("get " + name)}.call();`);
+        codeGen.add(`}`);
+        return;
+      }
+    }
+
+  }
+  if (typeExpr.typeRef.value.name === "HttpGetStream") {
+    if (typeExpr.parameters.length !== 1) {
+      throw new Error("Unexpected - typeExpr.parameters.length != 1");
+    }
+    const responseType = typeExpr.parameters[0];
+    switch (codeGenType) {
+      case "collect": {
+        importingHelper.addType(responseType);
+        return;
+      }
+      case "decl": {
+        if (comment) {
+          codeGen.add(`/** ${comment} */`);
+        }
+        codeGen.add(
+          `${camelCase("get " + name)}: GetStreamFn<${importingHelper.asReferencedName(responseType)}>;`
+        );
+        codeGen.add("");
+        return;
+      }
+      case "ctor": {
+        codeGen.add(`this.${camelCase("get " + name)} = this.mkGetStreamFn(api.${name});`);
+        return;
+      }
+      case "impl": {
+        codeGen.add("");
+        if (comment) {
+          codeGen.add(`/** ${comment} */`);
+        }
+
+        codeGen.add(`async ${name}(): Promise<${importingHelper.asReferencedName(responseType)}[]> {`);
+        codeGen.add(`  return this.${camelCase("get " + name)}.call();`);
+        codeGen.add(`}`);
+        return;
+      }
+    }
+  }
+  if (codeGenType === "collect") {
+    console.warn(`typescript-services: unrecognized field ${typeExpr.typeRef.value.name}`);
+  }
+}
+
 async function generateTypescriptService(params: {
   adlSearchPath: string[];
   outfile: string;
@@ -62,7 +188,7 @@ async function generateTypescriptService(params: {
   apiname: string;
   adlFiles: string[];
   adlgendirrel: string;
-  serviceclass: string
+  serviceclass: string;
 }) {
   const { adlSearchPath, outfile, apimodule, apiname, adlFiles, adlgendirrel, serviceclass } = params;
 
@@ -89,47 +215,20 @@ async function generateTypescriptService(params: {
       }
     },
     parameters: []
-  }
-
+  };
 
   const importingHelper = new ImportingHelper();
 
   importingHelper.addType(apiReqsTypeExpr, true, true);
 
+  // start rendering code:
+  const code = new CodeGen();
+  code.add("// tslint:disable: ordered-imports");
+
   // load all apiEntry referenced types into importingHelper to disambiguate imports:
   // it also recurses into all the type params of those types.
   for (const apiEntry of apiRequestsStruct.fields) {
-    if (apiEntry.typeExpr.typeRef.kind !== "reference") {
-      throw new Error("Unexpected - apiEntry.typeExpr.typeRef.kind !== reference");
-    }
-
-    if (apiEntry.typeExpr.typeRef.value.name === "HttpPost") {
-      if (apiEntry.typeExpr.parameters.length !== 2) {
-        throw new Error("Unexpected - apiEntry.typeExpr.parameters.length != 2");
-      }
-
-      const requestType = apiEntry.typeExpr.parameters[0];
-      const responseType = apiEntry.typeExpr.parameters[1];
-
-      importingHelper.addType(requestType);
-      importingHelper.addType(responseType);
-    }
-    if (apiEntry.typeExpr.typeRef.value.name === "HttpGet") {
-      if (apiEntry.typeExpr.parameters.length !== 1) {
-        throw new Error("Unexpected - apiEntry.typeExpr.parameters.length != 1");
-      }
-
-      const responseType = apiEntry.typeExpr.parameters[0];
-      importingHelper.addType(responseType);
-    }
-    if (apiEntry.typeExpr.typeRef.value.name === "HttpGetStream") {
-      if (apiEntry.typeExpr.parameters.length !== 1) {
-        throw new Error("Unexpected - apiEntry.typeExpr.parameters.length != 1");
-      }
-
-      const responseType = apiEntry.typeExpr.parameters[0];
-      importingHelper.addType(responseType);
-    }
+    addCode(importingHelper, loadedAdl, "collect", code, apiEntry.typeExpr, apiEntry.name, getComment(apiEntry));
   }
 
   // all required imports are now known.
@@ -141,10 +240,6 @@ async function generateTypescriptService(params: {
   const apiReqAsRefd = importingHelper.asReferencedName(apiReqsTypeExpr);
   const apiReqSn = `sn${apiReqAsRefd}`;
   const apiReqMaker = `make${apiReqAsRefd}`;
-
-  // start rendering code:
-  const code = new CodeGen();
-  code.add("// tslint:disable: ordered-imports");
 
   // typescript: import {foo as bar} from "blah"
   importingHelper.modulesImports.forEach((imports_: Set<string>, module: string) => {
@@ -180,56 +275,7 @@ async function generateTypescriptService(params: {
   // eg:/** Login a user */
   //    postLogin: PostFn<LoginReq, LoginResp>;
   for (const apiEntry of apiRequestsStruct.fields) {
-    if (apiEntry.typeExpr.typeRef.kind !== "reference") {
-      throw new Error("Unexpected - apiEntry.typeExpr.typeRef.kind !== reference");
-    }
-
-    if (apiEntry.typeExpr.typeRef.value.name === "HttpPost") {
-      if (apiEntry.typeExpr.parameters.length !== 2) {
-        throw new Error("Unexpected - apiEntry.typeExpr.parameters.length != 2");
-      }
-      const requestType = apiEntry.typeExpr.parameters[0];
-      const responseType = apiEntry.typeExpr.parameters[1];
-
-      const comment = getComment(apiEntry);
-      if (comment) {
-        classBody.add(`/** ${comment} */`);
-      }
-      classBody.add(
-        `${camelCase("post " + apiEntry.name)}: PostFn<${importingHelper.asReferencedName(
-          requestType
-        )}, ${importingHelper.asReferencedName(responseType)}>;`
-      );
-      classBody.add("");
-    }
-    if (apiEntry.typeExpr.typeRef.value.name === "HttpGet") {
-      if (apiEntry.typeExpr.parameters.length !== 1) {
-        throw new Error("Unexpected - apiEntry.typeExpr.parameters.length != 1");
-      }
-      const responseType = apiEntry.typeExpr.parameters[0];
-
-      const comment = getComment(apiEntry);
-      if (comment) {
-        classBody.add(`/** ${comment} */`);
-      }
-      classBody.add(`${camelCase("get " + apiEntry.name)}: GetFn<${importingHelper.asReferencedName(responseType)}>;`);
-      classBody.add("");
-    }
-    if (apiEntry.typeExpr.typeRef.value.name === "HttpGetStream") {
-      if (apiEntry.typeExpr.parameters.length !== 1) {
-        throw new Error("Unexpected - apiEntry.typeExpr.parameters.length != 1");
-      }
-      const responseType = apiEntry.typeExpr.parameters[0];
-
-      const comment = getComment(apiEntry);
-      if (comment) {
-        classBody.add(`/** ${comment} */`);
-      }
-      classBody.add(
-        `${camelCase("get " + apiEntry.name)}: GetStreamFn<${importingHelper.asReferencedName(responseType)}>;`
-      );
-      classBody.add("");
-    }
+    addCode(importingHelper, loadedAdl, "decl", classBody, apiEntry.typeExpr, apiEntry.name, getComment(apiEntry));
   }
 
   // generate constructor
@@ -245,42 +291,18 @@ async function generateTypescriptService(params: {
     .add("/** The authentication token (if any) */")
     .add("authToken: string | undefined,")
     .add("/** Error handler to allow for cross cutting concerns, e.g. authorization errors */")
-    .add("handleError: (error: HttpServiceError) => void")
+    .add("handleError: (error: HttpServiceError) => void");
 
   classBody.add(") {");
 
-  const ctorBody = classBody.inner()
+  const ctorBody = classBody.inner();
 
   ctorBody.add("super(http, baseUrl, resolver, authToken, handleError);");
   ctorBody.add(`const api = this.annotatedApi(${apiReqSn}, ${apiReqMaker}({}));`);
 
   // constructor body, initialisers for api endpoints metadata class members
   for (const apiEntry of apiRequestsStruct.fields) {
-    if (apiEntry.typeExpr.typeRef.kind !== "reference") {
-      throw new Error("Unexpected - apiEntry.typeExpr.typeRef.kind !== reference");
-    }
-
-    if (apiEntry.typeExpr.typeRef.value.name === "HttpPost") {
-      if (apiEntry.typeExpr.parameters.length !== 2) {
-        throw new Error("Unexpected - apiEntry.typeExpr.parameters.length != 2");
-      }
-
-      ctorBody.add(`this.${camelCase("post " + apiEntry.name)} = this.mkPostFn(api.${apiEntry.name});`);
-    }
-    if (apiEntry.typeExpr.typeRef.value.name === "HttpGet") {
-      if (apiEntry.typeExpr.parameters.length !== 1) {
-        throw new Error("Unexpected - apiEntry.typeExpr.parameters.length != 1");
-      }
-
-      ctorBody.add(`this.${camelCase("get " + apiEntry.name)} = this.mkGetFn(api.${apiEntry.name});`);
-    }
-    if (apiEntry.typeExpr.typeRef.value.name === "HttpGetStream") {
-      if (apiEntry.typeExpr.parameters.length !== 1) {
-        throw new Error("Unexpected - apiEntry.typeExpr.parameters.length != 1");
-      }
-
-      ctorBody.add(`this.${camelCase("get " + apiEntry.name)} = this.mkGetStreamFn(api.${apiEntry.name});`);
-    }
+    addCode(importingHelper, loadedAdl, "ctor", ctorBody, apiEntry.typeExpr, apiEntry.name, getComment(apiEntry));
   }
   classBody.add("}");
 
@@ -290,65 +312,8 @@ async function generateTypescriptService(params: {
   //      return this.postLogin.call(req);
   //    }
   for (const apiEntry of apiRequestsStruct.fields) {
-    if (apiEntry.typeExpr.typeRef.kind !== "reference") {
-      throw new Error("Unexpected - apiEntry.typeExpr.typeRef.kind !== reference");
-    }
-
-    if (apiEntry.typeExpr.typeRef.value.name === "HttpPost") {
-      if (apiEntry.typeExpr.parameters.length !== 2) {
-        throw new Error("Unexpected - apiEntry.typeExpr.parameters.length != 2");
-      }
-      const requestType = apiEntry.typeExpr.parameters[0];
-      const responseType = apiEntry.typeExpr.parameters[1];
-
-      const comment = getComment(apiEntry);
-      classBody.add("");
-      if (comment) {
-        classBody.add(`/** ${comment} */`);
-      }
-
-      classBody.add(
-        `async ${apiEntry.name}(req: ${importingHelper.asReferencedName(
-          requestType
-        )}): Promise<${importingHelper.asReferencedName(responseType)}> {`
-      );
-      classBody.add(`  return this.${camelCase("post " + apiEntry.name)}.call(req);`);
-      classBody.add(`}`);
-    }
-    if (apiEntry.typeExpr.typeRef.value.name === "HttpGet") {
-      if (apiEntry.typeExpr.parameters.length !== 1) {
-        throw new Error("Unexpected - apiEntry.typeExpr.parameters.length != 1");
-      }
-
-      const responseType = apiEntry.typeExpr.parameters[0];
-      const comment = getComment(apiEntry);
-      classBody.add("");
-      if (comment) {
-        classBody.add(`/** ${comment} */`);
-      }
-
-      classBody.add(`async ${apiEntry.name}(): Promise<${importingHelper.asReferencedName(responseType)}> {`);
-      classBody.add(`  return this.${camelCase("get " + apiEntry.name)}.call();`);
-      classBody.add(`}`);
-    }
-    if (apiEntry.typeExpr.typeRef.value.name === "HttpGetStream") {
-      if (apiEntry.typeExpr.parameters.length !== 1) {
-        throw new Error("Unexpected - apiEntry.typeExpr.parameters.length != 1");
-      }
-
-      const responseType = apiEntry.typeExpr.parameters[0];
-      const comment = getComment(apiEntry);
-      classBody.add("");
-      if (comment) {
-        classBody.add(`/** ${comment} */`);
-      }
-
-      classBody.add(`async ${apiEntry.name}(): Promise<${importingHelper.asReferencedName(responseType)}[]> {`);
-      classBody.add(`  return this.${camelCase("get " + apiEntry.name)}.call();`);
-      classBody.add(`}`);
-    }
+    addCode(importingHelper, loadedAdl, "impl", classBody, apiEntry.typeExpr, apiEntry.name, getComment(apiEntry));
   }
-
   code.add("");
 
   await fsx.writeFile(outfile, code.write().join('\n'));
