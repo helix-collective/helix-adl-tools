@@ -176,6 +176,26 @@ function addCode(importingHelper: ImportingHelper, loadedAdl: LoadedAdl, codeGen
       }
     }
   }
+  const adlType = loadedAdl.allAdlDecls[`${typeExpr.typeRef.value.moduleName}.${typeExpr.typeRef.value.name}`];
+  if (adlType) {
+    if (adlType.decl.type_.kind === "type_" || adlType.decl.type_.kind === "newtype_") {
+
+      if (adlType.decl.type_.value.typeParams.length !== 0) {
+        //TODO(garym:202104) Implement generics for type and newtype
+        // console.log("typeExpr", JSON.stringify(typeExpr, null, 2))
+        // const param2typeExpr: MAP PARAM NAME to DECL
+        // if( adlType.decl.type_.value.typeParams.length === typeExpr.parameters.length ) {
+        //   adlType.decl.type_.value.typeParams.forEach((t,i) => {
+        //    fill in map
+        //   })
+        // }
+        // console.log("Param", adlType.decl.type_.value.typeParams, JSON.stringify(adlType, null, 2))
+        throw new Error("ERROR: 'type' or 'newtype' with generic params not implemented in hx-adl ts-services.ts");
+      }
+      addCode(importingHelper, loadedAdl, codeGenType, codeGen, adlType.decl.type_.value.typeExpr, name, comment);
+    }
+    return;
+  }
   if (codeGenType === "collect") {
     console.warn(`typescript-services: unrecognized field ${typeExpr.typeRef.value.name}`);
   }
