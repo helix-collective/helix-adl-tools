@@ -1,0 +1,19 @@
+module mobile.reactnative {
+
+struct RnModule {
+  String moduleName = "";
+};
+
+struct NativeFunction<Req, Res> {
+  Nullable<Bool> blocking;
+  TypeToken<Req> reqType = null;
+  TypeToken<Res> respType = null;
+};
+
+struct NativeCallback<A, B> {
+  Nullable<Bool> blocking;
+  TypeToken<A> errType;
+  TypeToken<B> resType;
+};
+
+};

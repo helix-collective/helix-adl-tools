@@ -2,163 +2,37 @@ import * as fs from "fs";
 import * as path from "path";
 import * as adlast from "../adl-gen/sys/adlast";
 import * as mkdirp from "mkdirp";
-import { LoadedAdl } from "../util";
-import { camelCase } from "change-case";
-import { RNBridge } from "../gen-javarnmodule";
+import { getAnnotation, LoadedAdl, scopedName } from "../util";
+import { RNBridge } from "../gen-reactnativebridge";
 import {
+  getJavaFileName,
   writeAbstractImplementation,
   writeBridgingField,
 } from "./java-helpers";
-import { ImportingHelper } from "../ts-services/import-helper";
 import _ from "lodash";
 import {
+  getDepFilename,
+  getTsFileName,
   writeDep,
   writeTsBridges,
   writeTsInterface,
 } from "./typescript-helpers";
 
-const REACT_NATIVE_MODULE = "onederful.mobile.reactnative";
+// Scoped names of custom react-native types
+export const RN_ADL_MODULE = "mobile.reactnative";
+export const RN_MODULE = scopedName(RN_ADL_MODULE, "RnModule");
+export const NATIVE_FUNCTION = scopedName(RN_ADL_MODULE, "NativeFunction");
+export const NATIVE_CALLBACK = scopedName(RN_ADL_MODULE, "NativeCallback");
 
-export const isNativeFunction = (field: adlast.Field): boolean => {
-  return (
-    field.typeExpr.typeRef.kind === "reference" &&
-    field.typeExpr.typeRef.value.moduleName === REACT_NATIVE_MODULE &&
-    field.typeExpr.typeRef.value.name === "NativeFunction"
-  );
-};
-
-export const isNativeCallback = (field: adlast.Field): boolean => {
-  return (
-    field.typeExpr.typeRef.kind === "reference" &&
-    field.typeExpr.typeRef.value.moduleName === REACT_NATIVE_MODULE &&
-    field.typeExpr.typeRef.value.name === "NativeCallback"
-  );
-};
-
-/**
- *
- * Returns all NativeFunctions and NativeCallbacks
- */
-export const getBridgedMethods = (bridge: RNBridge): adlast.Field[] => {
-  return bridge.struct.value.fields.filter(
-    (field) => isNativeCallback(field) || isNativeFunction(field)
-  );
-};
-
-export const getJavaFileName = (
-  outdir: string,
-  nativeBridge: RNBridge,
-  packageName: string
-) => {
-  return (
-    outdir +
-    packageName.split(".").reduce((prev, current) => {
-      return prev.concat(`/${current}`);
-    }, "") +
-    nativeBridge.scopedDecl.moduleName.split(".").reduce((prev, current) => {
-      return prev.concat(`/${current}`);
-    }, "") +
-    "/" +
-    nativeBridge.scopedDecl.decl.name +
-    ".java"
-  );
-};
-
-export const getTsFileName = (outdir: string, nativeBridge: RNBridge) => {
-  // TODO: this may collide with identically named bridges? (don't do it?)
-  return (
-    outdir +
-    nativeBridge.scopedDecl.moduleName.split(".").reduce((prev, current) => {
-      return prev.concat(`/${current}`);
-    }, "") +
-    "/" +
-    nativeBridge.scopedDecl.decl.name +
-    ".ts"
-  );
-};
-
-export const getDepFilename = (
-  outdir: string,
-  scopedDecl: adlast.ScopedName
-) => {
-  return (
-    outdir +
-    scopedDecl.moduleName.split(".").reduce((prev, current) => {
-      return prev.concat(`/${current}`);
-    }, "") +
-    "/" +
-    scopedDecl.name +
-    ".ts"
-  );
-};
-
-export const getScopedName = (type: adlast.TypeExpr) => {
-  if (type.typeRef.kind === "reference") {
-    return type.typeRef.value.moduleName + "." + type.typeRef.value.name;
+export const getModuleName = (scopedDecl: adlast.ScopedDecl): string => {
+  const ann = getAnnotation(scopedDecl.decl.annotations, RN_MODULE);
+  if (ann && typeof ann["moduleName"] == "string") {
+    return ann["moduleName"];
   }
-  return "";
+  return scopedDecl.decl.name;
 };
 
-export const findUniqueImports = (bridge: RNBridge): adlast.TypeExpr[] => {
-  const imports: adlast.TypeExpr[] = [];
-
-  // TODO handle imports from different modules with same name
-  const fields = getBridgedMethods(bridge);
-
-  fields.forEach((field) => {
-    const req = field.typeExpr.parameters[0];
-    const res = field.typeExpr.parameters[1];
-
-    if (!imports.find((i) => getScopedName(i) === getScopedName(req))) {
-      if (req.typeRef.kind !== "primitive") imports.push(req);
-    }
-
-    if (!imports.find((i) => getScopedName(i) === getScopedName(res))) {
-      if (res.typeRef.kind !== "primitive") {
-        imports.push(res);
-      }
-    }
-  });
-
-  return imports;
-};
-
-const flattenType = (
-  adlTree: LoadedAdl,
-  moduleName: string,
-  prefix: string = ""
-): string => {
-  let result = "";
-
-  // console.log(reqType);
-  // console.log("***********");
-  const sDecl = adlTree.allAdlDecls[moduleName];
-  if (sDecl.decl.type_.kind === "struct_") {
-    const fields = sDecl.decl.type_.value.fields;
-    fields.forEach((field) => {
-      if (field.typeExpr.typeRef.kind === "primitive") {
-        // TODO: actually map value to java types
-        result += ` ${field.typeExpr.typeRef.value} ${prefix}${field.name},`;
-      }
-      if (field.typeExpr.typeRef.kind === "reference") {
-        result +=
-          flattenType(
-            adlTree,
-            field.typeExpr.typeRef.value.moduleName +
-              "." +
-              field.typeExpr.typeRef.value.name,
-            prefix + field.name + "_"
-          ) + ",";
-      }
-      // console.log(field);
-    });
-  }
-
-  result = result.trim();
-  const trim = result.replace(/(^,)|(,$)/g, "");
-  return trim;
-};
-
+// Utility class that helps write indented code blocks
 export class IndentableWriter {
   constructor(
     outfile: string,
@@ -200,6 +74,63 @@ export class IndentableWriter {
     this.writer.close();
   };
 }
+
+export const isNativeFunction = (field: adlast.Field): boolean => {
+  return (
+    field.typeExpr.typeRef.kind === "reference" &&
+    field.typeExpr.typeRef.value.moduleName == NATIVE_FUNCTION.moduleName &&
+    field.typeExpr.typeRef.value.name == NATIVE_FUNCTION.name
+  );
+};
+
+export const isNativeCallback = (field: adlast.Field): boolean => {
+  return (
+    field.typeExpr.typeRef.kind === "reference" &&
+    field.typeExpr.typeRef.value.moduleName == NATIVE_CALLBACK.moduleName &&
+    field.typeExpr.typeRef.value.name == NATIVE_CALLBACK.name
+  );
+};
+
+/**
+ *
+ * Returns all NativeFunctions and NativeCallbacks
+ */
+export const getBridgedMethods = (bridge: RNBridge): adlast.Field[] => {
+  return bridge.struct.value.fields.filter(
+    (field) => isNativeCallback(field) || isNativeFunction(field)
+  );
+};
+
+export const getScopedName = (type: adlast.TypeExpr) => {
+  if (type.typeRef.kind === "reference") {
+    return type.typeRef.value.moduleName + "." + type.typeRef.value.name;
+  }
+  return "";
+};
+
+export const findUniqueImports = (bridge: RNBridge): adlast.TypeExpr[] => {
+  const imports: adlast.TypeExpr[] = [];
+
+  // TODO handle imports from different modules with same name
+  const fields = getBridgedMethods(bridge);
+
+  fields.forEach((field) => {
+    const req = field.typeExpr.parameters[0];
+    const res = field.typeExpr.parameters[1];
+
+    if (!imports.find((i) => getScopedName(i) === getScopedName(req))) {
+      if (req.typeRef.kind !== "primitive") imports.push(req);
+    }
+
+    if (!imports.find((i) => getScopedName(i) === getScopedName(res))) {
+      if (res.typeRef.kind !== "primitive") {
+        imports.push(res);
+      }
+    }
+  });
+
+  return imports;
+};
 
 export const writeNativeBridge = (
   nativeBridge: RNBridge,
@@ -301,7 +232,8 @@ export const writeTypeScriptBridge = (
   }
 ): void => {
   const { outdir, loadedAdl } = params;
-  const importHelper = new ImportingHelper();
+
+  console.log("native bridge", nativeBridge.name);
 
   const filename = getTsFileName(outdir, nativeBridge);
   mkdirp.sync(path.dirname(filename));
@@ -325,8 +257,6 @@ export const writeTypeScriptBridge = (
     )
     .forEach((i) => {
       // this can produce duplicated imports across files
-      // TODO: solve this importing problem
-
       if (i.typeRef.kind === "reference") {
         const depFilename = getDepFilename(outdir, i.typeRef.value);
         mkdirp.sync(path.dirname(depFilename));

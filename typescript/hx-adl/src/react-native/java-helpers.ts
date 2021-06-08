@@ -1,6 +1,6 @@
 import { camelCase } from "change-case";
 import * as adlast from "../adl-gen/sys/adlast";
-import { RNBridge } from "../gen-javarnmodule";
+import { RNBridge } from "../gen-reactnativebridge";
 import { IndentableWriter } from "./react-native-utils";
 
 export const writeBridgingField = (
@@ -134,4 +134,24 @@ export const writeAbstractImplementation = (
   }
   writer.writeRaw(`);\n`);
   writer.blankLn();
+};
+
+// creates an appropriately located and named java source file
+export const getJavaFileName = (
+  outdir: string,
+  nativeBridge: RNBridge,
+  packageName: string
+) => {
+  return (
+    outdir +
+    packageName.split(".").reduce((prev, current) => {
+      return prev.concat(`/${current}`);
+    }, "") +
+    nativeBridge.scopedDecl.moduleName.split(".").reduce((prev, current) => {
+      return prev.concat(`/${current}`);
+    }, "") +
+    "/" +
+    nativeBridge.scopedDecl.decl.name +
+    ".java"
+  );
 };

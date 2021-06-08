@@ -2,12 +2,9 @@ import { camelCase } from "change-case";
 import * as adlast from "../adl-gen/sys/adlast";
 import { ImportingHelper } from "../ts-services/import-helper";
 import { LoadedAdl } from "../util";
-import {
-  getDepFilename,
-  getScopedName,
-  IndentableWriter,
-} from "./react-native-utils";
+import { getScopedName, IndentableWriter } from "./react-native-utils";
 import * as path from "path";
+import { RNBridge } from "../gen-reactnativebridge";
 
 const supportedTsType = (type: string): string => {
   switch (type) {
@@ -40,6 +37,21 @@ const supportedTsType = (type: string): string => {
   }
 };
 
+// creates an appropriately located and named typescript source file
+export const getTsFileName = (outdir: string, nativeBridge: RNBridge) => {
+  // TODO: this may collide with identically named bridges? (don't do it?)
+  return (
+    outdir +
+    nativeBridge.scopedDecl.moduleName.split(".").reduce((prev, current) => {
+      return prev.concat(`/${current}`);
+    }, "") +
+    "/" +
+    nativeBridge.scopedDecl.decl.name +
+    ".ts"
+  );
+};
+
+// writes the concrete class to be used in client code
 export const writeTsBridges = (
   field: adlast.Field,
   writer: IndentableWriter
@@ -77,6 +89,8 @@ export const writeTsBridges = (
   writer.blankLn();
 };
 
+// writes the interface for the native bridge
+// matches the @ReactMethod annotation on the Java Class
 export const writeTsInterface = (
   field: adlast.Field,
   writer: IndentableWriter
@@ -113,8 +127,9 @@ export const writeTsInterface = (
   }
 
   writer.blankLn();
-}; // write abstract bridging fields
+};
 
+// adds dependencies into the file
 export const writeDep = (
   allAdl: LoadedAdl,
   i: adlast.TypeExpr,
@@ -175,4 +190,19 @@ export const writeDep = (
   }
 
   writer.close();
+};
+
+export const getDepFilename = (
+  outdir: string,
+  scopedDecl: adlast.ScopedName
+) => {
+  return (
+    outdir +
+    scopedDecl.moduleName.split(".").reduce((prev, current) => {
+      return prev.concat(`/${current}`);
+    }, "") +
+    "/" +
+    scopedDecl.name +
+    ".ts"
+  );
 };
