@@ -1,5 +1,4 @@
 import program from "commander";
-import * as sqlalterformat  from "./gen-sql-alter-format";
 import * as sqlschema from "./gen-sqlschema";
 import * as javatables from "./gen-javatables";
 import * as javahttpreqs from "./gen-javahttpreqs";
@@ -10,8 +9,8 @@ import * as openapi from "./gen-openapi";
 
 program.name("hx-adl");
 program.version("1.0.0");
-sqlalterformat.configureCli(program);
-sqlschema.configureCli(program);
+sqlschema.configureCreateSqlCli(program);
+sqlschema.configureAlterFormatSqlCli(program);
 javatables.configureCli(program);
 javahttpreqs.configureCli(program);
 typescripthttpreqs.configureCli(program);
