@@ -65,23 +65,13 @@ export function configureAlterFormatSqlCli(program: Command) {
       const extensions: string[] = cmd['extension'];
       const templates: Template[] = parseTemplates(cmd['outtemplatesql'] || []);
 
-      let outfileCreate: string = "01-create.sql"
-      let outfileRearrange: string = "02-rearrange.sql"
-      let outfileConstrant: string = "03-constraints.sql"
-      let outfileDrop: string = "04-drop.sql"
-      // if (cmd['outfile']) {
-      //   outfileCreate = cmd['outfile']
-      //   outfileRearrange = cmd['outfile']
-      //   outfileConstrant = cmd['outfile']
-      //   outfileDrop = cmd['outfile']
-      // }
+      let outfileCreate: string = "Vx__create.sql"
+      let outfileConstrant: string = "Vy__constraints.sql"
       if (cmd['outputdir']) {
-        outfileCreate = cmd['outputdir'] + outfileCreate;
-        outfileRearrange = cmd['outputdir'] + outfileRearrange;
-        outfileConstrant = cmd['outputdir'] + outfileConstrant;
-        outfileDrop = cmd['outputdir'] + outfileDrop;
+        outfileCreate = cmd['outputdir'] + "/" + outfileCreate;
+        outfileConstrant = cmd['outputdir'] + "/" + outfileConstrant;
       }
-      const outfiles: string[] = [outfileCreate, outfileRearrange, outfileConstrant, outfileDrop];
+      const outfiles: string[] = [outfileCreate, outfileConstrant];
 
       let outmetadata: string | null = cmd['outmetadata'] || null;
 
@@ -270,8 +260,6 @@ async function generateAlterSqlSchema(params: Params, loadedAdl: LoadedAdl, dbTa
   const constraints: string[] = [];
   let allExtraSql: string[] = [];
 
-  writer.write("begin;\n");
-
   // Output the tables
   for(const t of dbTables) {
     const withIdPrimaryKey: boolean  = t.ann && t.ann['withIdPrimaryKey'] || false;
@@ -354,20 +342,13 @@ async function generateAlterSqlSchema(params: Params, loadedAdl: LoadedAdl, dbTa
 
     allExtraSql = allExtraSql.concat(extraSql);
   }
-  writer.write("\ncommit;\n\n");
   await writer.close();
 
   writer = fs.createWriteStream(params.outfiles[1]);
-  writer.write("begin;\n\n");
-  writer.write('-- vv START MANUAL CODE FOR MIGRATION' + '\n\n');
-  writer.write('-- ^^ END MANUAL CODE FOR MIGRATION' + '\n\n');
-  writer.write("commit;\n\n");
-  await writer.close();
-
-  writer = fs.createWriteStream(params.outfiles[2]);
   writer.write(`-- Schema auto-generated from adl modules: ${Array.from(moduleNames.keys()).join(', ')}\n`);
   writer.write(`--\n`);
-  writer.write("begin;\n\n");
+  writer.write(`-- Note postgres requires add column and alter column to be in separate transactions\n`);
+  writer.write(`--\n`);
   writer.write('-- vv update columns for set null value');
   for (const table of collectSetNotNullLines) {
     writer.write('\n');
@@ -387,13 +368,7 @@ async function generateAlterSqlSchema(params: Params, loadedAdl: LoadedAdl, dbTa
     writer.write(sql + '\n');
   }
   writer.write('-- ^^ extra sql from annotations \n');
-  writer.write("\ncommit;\n\n");
   await  writer.close();
-
-  writer = fs.createWriteStream(params.outfiles[3]);
-  writer.write("begin;\n\n");
-  writer.write("\ncommit;\n\n");
-  await writer.close();
 }
 
 /**
