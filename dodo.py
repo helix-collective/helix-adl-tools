@@ -149,7 +149,7 @@ def task_install_release():
             if force:
                 shutil.rmtree(str(dest), ignore_errors=True)
             else:
-                raise FileExistsError(f"Destination {str(dest)} exists already")
+                raise FileExistsError(f"Destination {str(dest)} exists already, Use --force to overwrite (delete & re-create)")
 
         dest.mkdir(parents=True, exist_ok=True)
         subprocess.run(f'unzip -q {os.path.abspath(hxadlbindist)}', cwd=str(dest), shell=True, check=True)

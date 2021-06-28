@@ -9,7 +9,8 @@ import * as openapi from "./gen-openapi";
 
 program.name("hx-adl");
 program.version("1.0.0");
-sqlschema.configureCli(program);
+sqlschema.configureCreateSqlCli(program);
+sqlschema.configureAlterFormatSqlCli(program);
 javatables.configureCli(program);
 javahttpreqs.configureCli(program);
 typescripthttpreqs.configureCli(program);

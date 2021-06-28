@@ -8,7 +8,7 @@ import { isEnum, typeExprToStringUnscoped } from './adl-gen/runtime/utils';
 import { Command } from "commander";
 import { snakeCase } from "change-case";
 
-export function configureCli(program: Command) {
+export function configureCreateSqlCli(program: Command) {
   program
    .command("sql [adlFiles...]")
    .option('-I, --searchdir <path>', 'Add to adl searchpath', collect, [])
@@ -26,9 +26,10 @@ export function configureCli(program: Command) {
      const extensions: string[] = cmd['extension'];
      const templates: Template[] = parseTemplates(cmd['outtemplatesql'] || []);
 
-     let outfile: string = cmd['outfile'];
+     const outfiles: string[] = []
+     outfiles[0] = cmd['outfile'];
      if (cmd['outputdir']) {
-       outfile = cmd['outputdir'] + '/create.sql';
+       outfiles[0] = cmd['outputdir'] + '/create.sql';
      }
 
      let outmetadata: string | null = cmd['outmetadata'] || null;
@@ -41,21 +42,62 @@ export function configureCli(program: Command) {
        dbProfile = mssql2DbProfile;
      }
 
-     generateSql({adlFiles, adlSearchPath, outfile, outmetadata, extensions, templates, dbProfile});
+     generateSql({adlFiles, adlSearchPath, outfiles, outmetadata, extensions, templates, dbProfile}, generateCreateSqlSchema);
    });
+}
+
+export function configureAlterFormatSqlCli(program: Command) {
+  program
+    .command("sql-alter-format [adlFiles...]")
+    .option('-I, --searchdir <path>', 'Add to adl searchpath', collect, [])
+    // .option('--outfile <path>', 'the resulting sql file', 'create.sql')
+    .option('--outputdir <dir>', 'the directory into which the sql is written (deprecated)')
+    .option('--outmetadata <path>', 'sql to insert the model metadata')
+    .option('--outtemplatesql <paths>', 'generate extra sql from a mustache template', collect, [])
+    .option('--postgres', 'Generate sql for postgres')
+    .option('--postgres-v2', 'Generate sql for postgres (model version 2)')
+    .option('--mssql', 'Generate sql for microsoft sqlserver')
+    .option('--extension <ext>', 'Add to included sql extensions', collect, [])
+    .option('--migration', 'Generate sql for migration')
+    .description('Generate a db schema from ADL files')
+    .action((adlFiles: string[], cmd: {}) => {
+      const adlSearchPath: string[] = cmd['searchdir'];
+      const extensions: string[] = cmd['extension'];
+      const templates: Template[] = parseTemplates(cmd['outtemplatesql'] || []);
+
+      let outfileCreate: string = "V00x_0__create.sql"
+      let outfileConstrant: string = "V00x_1__constraints.sql"
+      if (cmd['outputdir']) {
+        outfileCreate = cmd['outputdir'] + "/" + outfileCreate;
+        outfileConstrant = cmd['outputdir'] + "/" + outfileConstrant;
+      }
+      const outfiles: string[] = [outfileCreate, outfileConstrant];
+
+      let outmetadata: string | null = cmd['outmetadata'] || null;
+
+      let dbProfile = postgresDbProfile;
+      if (cmd['postgresV2']) {
+        dbProfile = postgres2DbProfile;
+      }
+      if (cmd['mssql']) {
+        dbProfile = mssql2DbProfile;
+      }
+
+      generateSql({ adlFiles, adlSearchPath, outfiles, outmetadata, extensions, templates, dbProfile }, generateAlterSqlSchema);
+    });
 }
 
 export interface Params {
   adlFiles: string[];
   adlSearchPath: string[];
-  outfile: string;
+  outfiles: string[];
   outmetadata: string | null;
   extensions: string[];
   templates: Template[];
   dbProfile: DbProfile;
 };
 
-interface Template {
+export interface Template {
   template: string;
   outfile: string;
 };
@@ -67,7 +109,9 @@ export interface DbTable {
   name: string;
 };
 
-export async function generateSql(params: Params): Promise<void> {
+type generateSqlSchema = (params: Params, loadedAdl: LoadedAdl, dbTables: DbTable[]) => Promise<void>;
+
+export async function generateSql(params: Params, fn: generateSqlSchema): Promise<void> {
   // Load the ADL based upon command line arguments
   const loadedAdl = await parseAdl(params.adlFiles, params.adlSearchPath);
 
@@ -85,7 +129,7 @@ export async function generateSql(params: Params): Promise<void> {
     }
   });
   dbTables.sort( (t1, t2) => t1.name < t2.name ? -1 : t1.name > t2.name ? 1 : 0);
-  await generateSqlSchema(params, loadedAdl, dbTables);
+  await fn(params, loadedAdl, dbTables);
   if (params.outmetadata !== null) {
     await generateMetadata(params.outmetadata, params, loadedAdl, dbTables);
   }
@@ -94,9 +138,9 @@ export async function generateSql(params: Params): Promise<void> {
   }
 }
 
-async function generateSqlSchema(params: Params, loadedAdl: LoadedAdl, dbTables: DbTable[]): Promise<void> {
+async function generateCreateSqlSchema(params: Params, loadedAdl: LoadedAdl, dbTables: DbTable[]): Promise<void> {
   // Now generate the SQL file
-  const writer = fs.createWriteStream(params.outfile);
+  const writer = fs.createWriteStream(params.outfiles[0]);
   const moduleNames : Set<string> = new Set(dbTables.map(dbt => dbt.scopedDecl.moduleName));
   writer.write( `-- Schema auto-generated from adl modules: ${Array.from(moduleNames.keys()).join(', ')}\n` );
   writer.write( `--\n` );
@@ -128,7 +172,7 @@ async function generateSqlSchema(params: Params, loadedAdl: LoadedAdl, dbTables:
       const columnName = getColumnName(f);
       const columnType = getColumnType(loadedAdl.resolver, f, params.dbProfile);
       lines.push({
-        code: `${columnName} ${columnType.sqltype}`,
+        code: `${columnName} ${columnType.sqltype}${columnType.notNullable ? " not null" : ""}`,
         comment: typeExprToStringUnscoped(f.typeExpr),
       });
       if (columnType.fkey) {
@@ -196,6 +240,137 @@ async function generateSqlSchema(params: Params, loadedAdl: LoadedAdl, dbTables:
   }
 }
 
+
+
+async function generateAlterSqlSchema(params: Params, loadedAdl: LoadedAdl, dbTables: DbTable[]): Promise<void> {
+  // Now generate the SQL file
+  let writer = fs.createWriteStream(params.outfiles[0]);
+  const moduleNames: Set<string> = new Set(dbTables.map(dbt => dbt.scopedDecl.moduleName));
+  writer.write(`-- Schema auto-generated from adl modules: ${Array.from(moduleNames.keys()).join(', ')}\n`);
+  writer.write(`--\n`);
+
+  if (params.extensions.length > 0) {
+    params.extensions.forEach(e => {
+      writer.write(`create extension ${e};\n`);
+    });
+    writer.write('\n');
+  }
+
+  const collectSetNotNullLines: { table: string, cols: string[] }[] = [];
+  const constraints: string[] = [];
+  let allExtraSql: string[] = [];
+
+  // Output the tables
+  for(const t of dbTables) {
+    const withIdPrimaryKey: boolean  = t.ann && t.ann['withIdPrimaryKey'] || false;
+    const withPrimaryKey: string[] = t.ann && t.ann['withPrimaryKey'] || [];
+    const indexes: string[][] = t.ann && t.ann['indexes'] || [];
+    const uniquenessConstraints: string[][] = t.ann && t.ann['uniquenessConstraints'] || [];
+    const extraSql: string[] = t.ann && t.ann['extraSql'] || [];
+
+    const lines: {code:string, comment?:string}[] = [];
+    // collect columns from tables that need to be set as the primary key
+    const pkLines: string[] = [];
+
+    const notNullCols: string[] = []
+    collectSetNotNullLines.push({ table: t.name, cols: notNullCols })
+
+    if (withIdPrimaryKey) {
+      lines.push({code: `id ${params.dbProfile.idColumnType}`});
+      pkLines.push(`alter table ${quoteReservedName(t.name)} add primary key(id)`);
+      notNullCols.push('id');
+    } else if (withPrimaryKey.length > 0) {
+      const cols = withPrimaryKey.map(findColName);
+      pkLines.push(`alter table ${quoteReservedName(t.name)} add primary key(${cols.join(',')})`);
+    }
+    for(const f of t.struct.value.fields) {
+      const columnName = getColumnName(f);
+      const columnType = getColumnType(loadedAdl.resolver, f, params.dbProfile);
+      lines.push({
+        code: `${columnName} ${columnType.sqltype}`,
+        comment: typeExprToStringUnscoped(f.typeExpr),
+      });
+      if (columnType.notNullable) {
+        notNullCols.push(columnName);
+      }
+      if (columnType.fkey) {
+        constraints.push(`alter table ${quoteReservedName(t.name)} add constraint ${t.name}_${columnName}_fk foreign key (${columnName}) references ${quoteReservedName(columnType.fkey.table)}(${columnType.fkey.column});`);
+      }
+    }
+
+    function findColName(s: string):string {
+      for(const f of t.struct.value.fields) {
+        if (f.name == s) {
+          return getColumnName(f);
+        }
+      }
+      return s;
+    }
+
+    for(let i = 0; i < indexes.length; i++) {
+      const cols = indexes[i].map(findColName);
+      constraints.push(`create index if not exists ${t.name}_${i + 1}_idx on ${quoteReservedName(t.name)}(${cols.join(', ')});`);
+    }
+    for(let i = 0; i < uniquenessConstraints.length; i++) {
+      const cols = uniquenessConstraints[i].map(findColName);
+      constraints.push(`alter table ${quoteReservedName(t.name)} add constraint ${t.name}_${i + 1}_con unique (${cols.join(', ')});`);
+    }
+    if (withIdPrimaryKey) {
+      lines.push({code: `alter table ${quoteReservedName(t.name)} add primary key(id);`});
+    } else if (withPrimaryKey.length > 0) {
+      const cols = withPrimaryKey.map(findColName);
+      lines.push({code: `alter table ${quoteReservedName(t.name)} add primary key(${cols.join(',')});` });
+    }
+
+
+    writer.write('\n');
+    writer.write(`create table if not exists ${quoteReservedName(t.name)} ();` + '\n');
+
+    for(let i = 0; i < lines.length; i++) {
+      let line = lines[i].code;
+      if (i < lines.length-1) {
+        line = `alter table ${quoteReservedName(t.name)} add column if not exists ${line};`;
+        writer.write(line + '\n');
+      }
+    }
+
+    for (let i = 0; i < pkLines.length; i++) {
+      let line = pkLines[i];
+      line = `${line};`;
+      writer.write(line + '\n');
+    }
+
+    allExtraSql = allExtraSql.concat(extraSql);
+  }
+  await writer.close();
+
+  writer = fs.createWriteStream(params.outfiles[1]);
+  writer.write(`-- Schema auto-generated from adl modules: ${Array.from(moduleNames.keys()).join(', ')}\n`);
+  writer.write(`--\n`);
+  writer.write(`-- Note postgres requires add column and alter column to be in separate transactions\n`);
+  writer.write(`--\n`);
+  writer.write('-- vv update columns for set null value');
+  for (const table of collectSetNotNullLines) {
+    writer.write('\n');
+    for (const col of table.cols) {
+      writer.write(`alter table ${quoteReservedName(table.table)} alter column ${col} set not null;\n`)
+    }
+  }
+  writer.write('-- ^^ update columns for set null value' + '\n\n');
+  writer.write('-- vv constraints from annotations \n');
+  for (const constraint of constraints) {
+    writer.write(constraint + '\n');
+  }
+  writer.write('-- ^^ constraints from annotations \n\n');
+  writer.write('-- vv extra sql from annotations \n');
+  // And any sql
+  for(const sql of allExtraSql) {
+    writer.write(sql + '\n');
+  }
+  writer.write('-- ^^ extra sql from annotations \n');
+  await  writer.close();
+}
+
 /**
  *  Returns the SQL name for the table
  */
@@ -254,6 +429,7 @@ interface ColumnType {
     table: string,
     column: string
   };
+  notNullable: boolean;
 };
 
 
@@ -270,14 +446,16 @@ function getColumnType(resolver: adl.DeclResolver, field: adlast.Field,  dbProfi
     ) {
     return {
       sqltype: annctype || getColumnType1(resolver, typeExpr.parameters[0], dbProfile),
-      fkey: getForeignKeyRef(resolver, typeExpr.parameters[0])
+      fkey: getForeignKeyRef(resolver, typeExpr.parameters[0]),
+      notNullable: false,
     };
   }
 
   // For all other types, the column will not allow nulls
   return {
-    sqltype: (annctype || getColumnType1(resolver, typeExpr, dbProfile)) + " not null",
-    fkey: getForeignKeyRef(resolver, typeExpr)
+    sqltype: (annctype || getColumnType1(resolver, typeExpr, dbProfile)),
+    fkey: getForeignKeyRef(resolver, typeExpr),
+    notNullable: true,
   };
 }
 
