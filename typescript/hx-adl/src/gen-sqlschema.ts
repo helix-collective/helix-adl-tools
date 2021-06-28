@@ -65,8 +65,8 @@ export function configureAlterFormatSqlCli(program: Command) {
       const extensions: string[] = cmd['extension'];
       const templates: Template[] = parseTemplates(cmd['outtemplatesql'] || []);
 
-      let outfileCreate: string = "Vx__create.sql"
-      let outfileConstrant: string = "Vy__constraints.sql"
+      let outfileCreate: string = "V00x_0__create.sql"
+      let outfileConstrant: string = "V00x_1__constraints.sql"
       if (cmd['outputdir']) {
         outfileCreate = cmd['outputdir'] + "/" + outfileCreate;
         outfileConstrant = cmd['outputdir'] + "/" + outfileConstrant;
