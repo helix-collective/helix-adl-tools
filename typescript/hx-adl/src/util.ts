@@ -23,7 +23,7 @@ export interface LoadedAdl {
  * Runs the adl compiler as a subprocess, using the environment variable ADLC to
  * specify the path.
  */
-export async function parseAdl(adlFiles: string[], adlSearchPath: string[]): Promise<LoadedAdl> {
+export async function parseAdl(adlFiles: string[], adlSearchPath: string[], merge_adlext: string | undefined = undefined): Promise<LoadedAdl> {
   const moduleMapJB = createJsonBinding(RESOLVER, adl.texprStringMap(adlast.texprModule()));
 
   // Work in a temporary directory
@@ -35,6 +35,9 @@ export async function parseAdl(adlFiles: string[], adlSearchPath: string[]): Pro
   let args = ["ast", `--combined-output=${outfile}`]
   for(const dir of adlSearchPath) {
     args = args.concat(['-I', dir]);
+  }
+  if(merge_adlext) {
+    args = args.concat([`--merge-adlext=${merge_adlext}`]);
   }
   args = args.concat(adlFiles);
   try {
@@ -59,6 +62,7 @@ export async function parseAdl(adlFiles: string[], adlSearchPath: string[]): Pro
   const resolver : adl.DeclResolver = adl.declResolver(allAdlDecls);
 
   // Cleanup
+  // console.log(workdir, outfile);
   await unlinkP(outfile);
   workdir.removeCallback();
 

@@ -65,7 +65,7 @@ export class ImportingHelper {
   importSns: Set<ScopedName> = new Set();
   importMakeFns: Set<ScopedName> = new Set();
 
-  addType(type: TypeExpr, withSn : boolean=false, withMakeFn: boolean=false) {
+  addType(type: TypeExpr) {
     if (type.typeRef.kind === "primitive") {
       switch (type.typeRef.value) {
 
@@ -101,13 +101,6 @@ export class ImportingHelper {
     if (type.typeRef.kind === "reference") {
       // tslint:disable-next-line: no-console
       this.modulesTypes.add(type.typeRef.value);
-
-      if(withSn) {
-        this.importSns.add(type.typeRef.value);
-      }
-      if(withMakeFn) {
-        this.importMakeFns.add(type.typeRef.value);
-      }
 
       // recurse into the type params:
       for (const tp of type.parameters) {
@@ -167,43 +160,43 @@ export class ImportingHelper {
           if (type.parameters.length !== 1) {
             throw new Error("Expected only 1 tparam");
           }
-          return `${this.asReferencedName(type.parameters[0])}[]`;
+          return `List<${this.asReferencedName(type.parameters[0])}>`;
 
         case 'Nullable':
           if (type.parameters.length !== 1) {
             throw new Error("Expected only 1 tparam");
           }
-          return `(${this.asReferencedName(type.parameters[0])}|null)`;
+          return `Optional<${this.asReferencedName(type.parameters[0])}>`;
 
         case 'StringMap':
           if (type.parameters.length !== 1) {
             throw new Error("Expected only 1 tparam");
           }
-          return `{[key:string]:${this.asReferencedName(type.parameters[0])}}`;
-
+          return `Map<String,${this.asReferencedName(type.parameters[0])}>`;
         case 'Void':
-          return "undefined";
-        
+          return "AdlVoid";
         case 'String':
-          return "string";
-
+          return "String";
         case 'Bool':
-          return "boolean";
-
+          return "Boolean";
         case 'Int8':
-        case 'Int16':
-        case 'Int32':
-        case 'Int64':
         case 'Word8':
+            return "Byte";
+        case 'Int16':
         case 'Word16':
+            return "Short";
+        case 'Int32':
         case 'Word32':
+            return "Integer";
+        case 'Int64':
         case 'Word64':
+          return "Long";
         case 'Float':
+          return "Float";
         case 'Double':
-          return "number";
-
+          return "Double";
         case 'Json':
-          return "{}";
+          return "JsonElement";
 
         default:
           throw new Error("Unexpected primitive " + type.typeRef.value);

@@ -4,6 +4,7 @@ import * as javatables from "./gen-javatables";
 import * as javahttpreqs from "./gen-javahttpreqs";
 import * as typescripthttpreqs from "./gen-typescripthttpreqs";
 import * as typescriptservices from "./ts-services/ts-services";
+import * as javaservices from "./java-services/java-services";
 
 import * as openapi from "./gen-openapi";
 
@@ -14,8 +15,10 @@ sqlschema.configureAlterFormatSqlCli(program);
 javatables.configureCli(program);
 javahttpreqs.configureCli(program);
 typescripthttpreqs.configureCli(program);
+javaservices.configureCli(program);
 typescriptservices.configureCli(program);
 openapi.configureCli(program);
+
 
 // error on unknown commands
 program.on('command:*', function () {
