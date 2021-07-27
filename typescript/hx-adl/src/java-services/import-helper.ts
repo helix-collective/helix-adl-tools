@@ -1,5 +1,6 @@
 import { camelCase, pascalCase } from "change-case";
 import { ScopedName, TypeExpr } from "../adl-gen/runtime/sys/adlast";
+import { LoadedAdl } from "../util";
 
 export class StringMapSet {
   private readonly map: Map<string, Set<string>>;
@@ -65,7 +66,7 @@ export class ImportingHelper {
   importSns: Set<ScopedName> = new Set();
   importMakeFns: Set<ScopedName> = new Set();
 
-  addType(type: TypeExpr) {
+  addType(type: TypeExpr, loadedAdl: LoadedAdl) {
     if (type.typeRef.kind === "primitive") {
       switch (type.typeRef.value) {
 
@@ -75,7 +76,7 @@ export class ImportingHelper {
         case 'StringMap':
           // recurse into the type params:
           for (const tp of type.parameters) {
-            this.addType(tp);
+            this.addType(tp,loadedAdl);
           }
           break;
         case 'Void':
@@ -99,12 +100,18 @@ export class ImportingHelper {
       }
     }
     if (type.typeRef.kind === "reference") {
+      // If it's an adl `type X = Y`
+      const adlType = loadedAdl.allAdlDecls[`${type.typeRef.value.moduleName}.${type.typeRef.value.name}`];
+      if(adlType.decl.type_.kind === "type_") {
+        console.log("ADL type", `${type.typeRef.value.moduleName}.${type.typeRef.value.name}` )
+        const tp = adlType.decl.type_.value.typeExpr
+        this.addType(tp,loadedAdl);
+      }
       // tslint:disable-next-line: no-console
       this.modulesTypes.add(type.typeRef.value);
-
       // recurse into the type params:
       for (const tp of type.parameters) {
-        this.addType(tp);
+        this.addType(tp,loadedAdl);
       }
     }
     if (type.typeRef.kind === "typeParam") {
@@ -152,7 +159,7 @@ export class ImportingHelper {
   /** Get a typeExpr in form as imported (possibly as a different name)
    * also in the form used by typescript
    **/
-  asReferencedName(type: TypeExpr): string {
+  asReferencedName(type: TypeExpr, loadedAdl: LoadedAdl): string {
     if (type.typeRef.kind === "primitive") {
 
       switch (type.typeRef.value) {
@@ -160,19 +167,19 @@ export class ImportingHelper {
           if (type.parameters.length !== 1) {
             throw new Error("Expected only 1 tparam");
           }
-          return `List<${this.asReferencedName(type.parameters[0])}>`;
+          return `List<${this.asReferencedName(type.parameters[0],loadedAdl)}>`;
 
         case 'Nullable':
           if (type.parameters.length !== 1) {
             throw new Error("Expected only 1 tparam");
           }
-          return `Optional<${this.asReferencedName(type.parameters[0])}>`;
+          return `Optional<${this.asReferencedName(type.parameters[0],loadedAdl)}>`;
 
         case 'StringMap':
           if (type.parameters.length !== 1) {
             throw new Error("Expected only 1 tparam");
           }
-          return `Map<String,${this.asReferencedName(type.parameters[0])}>`;
+          return `Map<String,${this.asReferencedName(type.parameters[0],loadedAdl)}>`;
         case 'Void':
           return "AdlVoid";
         case 'String':
@@ -203,14 +210,25 @@ export class ImportingHelper {
       }
     }
     if (type.typeRef.kind === "reference") {
-      const asImported = this.asImportedNames.get(type.typeRef.value);
+      let asImported = this.asImportedNames.get(type.typeRef.value);
       if (asImported === undefined) {
         throw new Error(`No asImported name found - ${type.typeRef.value.name}`);
+      }
+      // If it's an adl `type X = Y`
+      const adlType = loadedAdl.allAdlDecls[`${type.typeRef.value.moduleName}.${type.typeRef.value.name}`];
+      if(adlType.decl.type_.kind === "type_") {
+        console.log("ADL type", `${type.typeRef.value.moduleName}.${type.typeRef.value.name}` )
+        const tp = adlType.decl.type_.value.typeExpr
+        asImported = this.asReferencedName(tp,loadedAdl);
+        console.log("ADL type", asImported)
+        if (asImported === undefined) {
+          throw new Error(`No asImported name found - ${type.typeRef.value.name}`);
+        }
       }
 
       if (type.parameters.length > 0) {
         // generic type with type parameters:
-        const typeParamsNames = type.parameters.map((tp) => this.asReferencedName(tp));
+        const typeParamsNames = type.parameters.map((tp) => this.asReferencedName(tp,loadedAdl));
         return `${asImported}<${typeParamsNames.join(",")}>`;
       } else {
         // ordinary ADL referred type
