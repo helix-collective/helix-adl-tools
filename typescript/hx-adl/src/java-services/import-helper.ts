@@ -118,7 +118,7 @@ export class ImportingHelper {
       // If it's an adl `type X = Y`
       const adlType = loadedAdl.allAdlDecls[`${type.typeRef.value.moduleName}.${type.typeRef.value.name}`];
       if(adlType.decl.type_.kind === "type_") {
-        console.log("ADL type", `${type.typeRef.value.moduleName}.${type.typeRef.value.name}` )
+        // console.log("ADL type import", `${type.typeRef.value.moduleName}.${type.typeRef.value.name}` )
         const tp = adlType.decl.type_.value.typeExpr
         this.addType(tp,loadedAdl);
       }
@@ -229,10 +229,10 @@ export class ImportingHelper {
       // If it's an adl `type X = Y`
       const adlType = loadedAdl.allAdlDecls[`${type.typeRef.value.moduleName}.${type.typeRef.value.name}`];
       if(adlType.decl.type_.kind === "type_") {
-        console.log("ADL type", `${type.typeRef.value.moduleName}.${type.typeRef.value.name}` )
+        // console.log("ADL type !!", `${type.typeRef.value.moduleName}.${type.typeRef.value.name}` )
         const tp = adlType.decl.type_.value.typeExpr
         asImported = this.asReferencedName(tp,loadedAdl);
-        console.log("ADL type", asImported)
+        // console.log("ADL type **", asImported)
         if (asImported === undefined) {
           throw new Error(`No asImported name found - ${type.typeRef.value.name}`);
         }
