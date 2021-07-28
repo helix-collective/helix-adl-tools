@@ -57,7 +57,8 @@ export class ScopedNameBiMapSet {
  * esp if there are duplicate types in different modules
  * tuned for how typescript can rename imports via: import { foo as bar } from blah */
 export class ImportingHelper {
-  modulesTypes = new ScopedNameBiMapSet();
+  moduleTypes = new ScopedNameBiMapSet();
+  javaImports = new Set<string>();
 
   asImportedNames: Map<ScopedName, string> = new Map<ScopedName, string>();
 
@@ -66,20 +67,35 @@ export class ImportingHelper {
   importSns: Set<ScopedName> = new Set();
   importMakeFns: Set<ScopedName> = new Set();
 
+  addTypeParams(type: TypeExpr, loadedAdl: LoadedAdl) {
+    // recurse into the type params:
+    for (const tp of type.parameters) {
+      this.addType(tp,loadedAdl);
+    }
+  }
+
   addType(type: TypeExpr, loadedAdl: LoadedAdl) {
     if (type.typeRef.kind === "primitive") {
       switch (type.typeRef.value) {
-
         // primitives that have type params:
         case 'Vector':
+          this.javaImports.add("java.util.List");
+          this.addTypeParams(type, loadedAdl)
+          break;
         case 'Nullable':
+          this.javaImports.add("java.util.Optional");
+          this.addTypeParams(type, loadedAdl)
+          break;
         case 'StringMap':
-          // recurse into the type params:
-          for (const tp of type.parameters) {
-            this.addType(tp,loadedAdl);
-          }
+          this.javaImports.add("java.util.Map");
+          this.addTypeParams(type, loadedAdl)
           break;
         case 'Void':
+          this.javaImports.add("au.com.helixta.adl.runtime.AdlVoid");
+          break;
+        case 'Json':
+          this.javaImports.add("com.google.gson.JsonElement");
+          break;
         case 'String':
         case 'Bool':
         case 'Int8':
@@ -92,7 +108,6 @@ export class ImportingHelper {
         case 'Word64':
         case 'Float':
         case 'Double':
-        case 'Json':
           break;
 
         default:
@@ -108,11 +123,8 @@ export class ImportingHelper {
         this.addType(tp,loadedAdl);
       }
       // tslint:disable-next-line: no-console
-      this.modulesTypes.add(type.typeRef.value);
-      // recurse into the type params:
-      for (const tp of type.parameters) {
-        this.addType(tp,loadedAdl);
-      }
+      this.moduleTypes.add(type.typeRef.value);
+      this.addTypeParams(type, loadedAdl)
     }
     if (type.typeRef.kind === "typeParam") {
       throw new Error("Unexpected type.typeRef.kind === 'typeParam'");
@@ -123,9 +135,9 @@ export class ImportingHelper {
     this.asImportedNames.clear();
 
 
-    for (const sn of this.modulesTypes.scopedNames) {
+    for (const sn of this.moduleTypes.scopedNames) {
       // tslint:disable-next-line: no-non-null-assertion
-      const mods = Array.from(this.modulesTypes.reverse.get(sn.name)!);
+      const mods = Array.from(this.moduleTypes.reverse.get(sn.name)!);
 
       // figure out which scopedNames have ambiguous names (ie in common between several modules)
       if (mods.length === 1) {

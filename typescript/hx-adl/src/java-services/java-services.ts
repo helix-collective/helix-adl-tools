@@ -402,11 +402,15 @@ async function generateTypescriptService(params: {
 
   // hardcoded common imports
   code.add("");
-  code.add(`import au.com.helixta.adl.runtime.AdlVoid;`);
-  code.add(`import com.google.gson.JsonElement;`);
-  code.add(`import java.util.List;`);
-  code.add(`import java.util.Map;`);
-  code.add(`import java.util.Optional;`);
+  importingHelper.javaImports.forEach(imp => {
+   code.add(`import ${imp};`);
+  })
+  code.add("");
+  // code.add(`import au.com.helixta.adl.runtime.AdlVoid;`);
+  // code.add(`import com.google.gson.JsonElement;`);
+  // code.add(`import java.util.List;`);
+  // code.add(`import java.util.Map;`);
+  // code.add(`import java.util.Optional;`);
   code.add(`import au.com.helixta.service.http.core.HttpUtil.HxContext;`);
   code.add(`import static au.com.onederful.servers.HandlerUtil.adl;`);
   code.add(`import static au.com.helixta.adl.custom.HelixRequestHandlers.handle;`);
