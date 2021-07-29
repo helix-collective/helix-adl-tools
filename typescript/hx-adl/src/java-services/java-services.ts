@@ -1,4 +1,4 @@
-import { camelCase } from 'change-case';
+// import { camelCase } from 'change-case';
 import { Command } from 'commander';
 import * as fsx from 'fs-extra';
 
@@ -12,26 +12,29 @@ export function configureCli(program: Command) {
   program
     .command("java-services [adlFiles...]")
     .option('-I, --searchdir <path>', 'Add to adl searchpath', collect, [])
-    .option('--outfile <path>', 'the output IService.java file')
-    .option('--javapackage <str>', 'Java package')
     .option('--apimodule <str>', 'ADL module name for the struct that has the API defs')
     .option('--apiname <str>', 'ADL struct name for the struct that has the API defs')
     .option('--apifield <str>', 'ADL field inside the apiname struct', '')
+    .option('--package <path>', 'default package to prepend to module name if no package speced in <file>.adl-java', '')
+    .option('--javasrcroot <path>', 'root directory for java src')
+    .option('--servicepackage <str>', 'Java package for the service')
     .option('--serviceclass <str>', 'Class name for the service', 'AppService')
 
     .description('Generate a java api service interface file.')
     .action((adlFiles: string[], cmd: {}) => {
       const adlSearchPath: string[] = cmd["searchdir"];
-      const outfile: string = cmd["outfile"];
-      const javapackage: string = cmd["javapackage"];
+      const javasrcroot: string = cmd["javasrcroot"];
+      const defpackage: string = cmd["package"]
+      const servicepackage: string = cmd["servicepackage"];
       const apimodule: string = cmd["apimodule"];
       const apiname: string = cmd["apiname"];
       const apifield: string = cmd["apifield"];
       const serviceclass: string = cmd["serviceclass"];
       generateTypescriptService({
         adlSearchPath,
-        outfile,
-        javapackage,
+        defpackage,
+        javasrcroot,
+        servicepackage,
         apimodule,
         apiname,
         apifield,
@@ -98,7 +101,7 @@ function addCode(
           codeGen.add(`/** ${comment} */`);
         }
         codeGen.add(
-          `${importingHelper.asReferencedName(responseType, loadedAdl)} ${camelCase(name)}(HxContext ctx, ${importingHelper.asReferencedName(requestType, loadedAdl)} req);`
+          `${importingHelper.asReferencedName(responseType, loadedAdl)} ${name}(HxContext ctx, ${importingHelper.asReferencedName(requestType, loadedAdl)} req);`
         );
         codeGen.add("");
         return;
@@ -118,14 +121,6 @@ function addCode(
         if (comment) {
           codeGen.add(`/** ${comment} */`);
         }
-
-        codeGen.add(
-          `async ${name}(req: ${importingHelper.asReferencedName(
-            requestType, loadedAdl
-          )}): Promise<${importingHelper.asReferencedName(responseType, loadedAdl)}> {`
-        );
-        codeGen.add(`  return this.${camelCase("post " + name)}.call(req);`);
-        codeGen.add(`}`);
         return;
       }
     }
@@ -145,14 +140,18 @@ function addCode(
           codeGen.add(`/** ${comment} */`);
         }
         codeGen.add(
-          `${importingHelper.asReferencedName(responseType, loadedAdl)} ${camelCase(name)}(HxContext ctx);`
+          `${importingHelper.asReferencedName(responseType, loadedAdl)} ${name}(HxContext ctx);`
         );
         codeGen.add("");
         return;
       }
       case "ctor": {
-        codeGen.add(`// register ${name} as a get`);
+        const Name = name[0].toUpperCase() + name.substr(1) 
+        codeGen.add(`// register ${name} as a post`);
         codeGen.add(`// ${JSON.stringify(getValue(name))}`);
+        codeGen.add(`adl(REQUESTS.get${Name}(), (i, o) -> {`);
+        codeGen.add(`  handle(REQUESTS.get${Name}(), i, o, (t) -> t.send(impl.${name}(ctx)));`);
+        codeGen.add(`});`);
         codeGen.add("");
         return;
       }
@@ -161,9 +160,6 @@ function addCode(
         if (comment) {
           codeGen.add(`/** ${comment} */`);
         }
-        codeGen.add(`async ${name}(): Promise<${importingHelper.asReferencedName(responseType, loadedAdl)}> {`);
-        codeGen.add(`  return this.${camelCase("get " + name)}.call();`);
-        codeGen.add(`}`);
         return;
       }
     }
@@ -183,14 +179,15 @@ function addCode(
         if (comment) {
           codeGen.add(`/** ${comment} */`);
         }
-        codeGen.add(
-          `${camelCase("get " + name)}: GetStreamFn<${importingHelper.asReferencedName(responseType, loadedAdl)}>;`
-        );
+        codeGen.add(`TODO`);
+        // codeGen.add(
+        //   `${camelCase("get " + name)}: GetStreamFn<${importingHelper.asReferencedName(responseType, loadedAdl)}>;`
+        // );
         codeGen.add("");
         return;
       }
       case "ctor": {
-        codeGen.add(`this.${camelCase("get " + name)} = this.mkGetStreamFn(api.${name});`);
+        codeGen.add(`TODO`);
         return;
       }
       case "impl": {
@@ -198,10 +195,6 @@ function addCode(
         if (comment) {
           codeGen.add(`/** ${comment} */`);
         }
-
-        codeGen.add(`async ${name}(): Promise<${importingHelper.asReferencedName(responseType, loadedAdl)}[]> {`);
-        codeGen.add(`  return this.${camelCase("get " + name)}.call();`);
-        codeGen.add(`}`);
         return;
       }
     }
@@ -235,15 +228,16 @@ function addCode(
 
 async function generateTypescriptService(params: {
   adlSearchPath: string[];
-  outfile: string;
-  javapackage: string;
   apimodule: string;
   apiname: string;
   apifield: string;
-  adlFiles: string[];
+  defpackage: string;
+  javasrcroot: string;
+  servicepackage: string;
   serviceclass: string;
+  adlFiles: string[];
 }) {
-  const { adlSearchPath, outfile, javapackage, apimodule, apiname, apifield, adlFiles, serviceclass } = params;
+  const { adlSearchPath, javasrcroot, defpackage, servicepackage, apimodule, apiname, apifield, adlFiles, serviceclass } = params;
 
   // Load the ADL based upon command line arguments
   const loadedAdl = await parseAdl(adlFiles, adlSearchPath, "adl-java");
@@ -332,25 +326,15 @@ async function generateTypescriptService(params: {
   if(apiReqsTypeExpr === undefined) {
     throw new Error("!@#$%^&*()")
   }
-  // const apiReqsTypeExpr: TypeExpr = {
-  //   typeRef: {
-  //     kind: 'reference',
-  //     value: {
-  //       moduleName: apimodule,
-  //       name: apiname
-  //     }
-  //   },
-  //   parameters: []
-  // };
 
   const importingHelper = new ImportingHelper();
-
   importingHelper.addType(apiReqsTypeExpr, loadedAdl);
 
   // start rendering code:
   const code = new CodeGen();
   code.add(`/* @generated from adl module ${apimodule} apiname: ${apiname}${apifield === "" ? "" : "::" + apifield}*/`);
-  code.add(`package ${javapackage};`);
+  code.add(`package ${servicepackage};`);
+  code.add("");
 
   // load all apiEntry referenced types into importingHelper to disambiguate imports:
   // it also recurses into all the type params of those types.
@@ -368,13 +352,9 @@ async function generateTypescriptService(params: {
 
   // all required imports are now known.
   // resolve the duplicates.
-
   importingHelper.resolveImports();
 
-  // get the as-referenced name of the struct that holds the runtime definition of the API:
-  const apiReqAsRefd = importingHelper.asReferencedName(apiReqsTypeExpr, loadedAdl);
-
-  // typescript: import {foo as bar} from "blah"
+  const importStrs: string[] = []
   importingHelper.modulesImports.forEach((imports_: Set<string>, module: string) => {
     const apiModule: Module | undefined = loadedAdl.modules[module]
     const jp = module === "sys.types" 
@@ -388,17 +368,22 @@ async function generateTypescriptService(params: {
     }
     // console.log("ANN", module, jp, modImports)
     modImports.forEach(m => {
-      const pkg = jp !== null ? jp : module;
-      if( javapackage === pkg ) {
+      const pkg = jp !== null 
+        ? jp 
+        : (defpackage === "" ? module : defpackage + "." + module);
+      if( servicepackage === pkg ) {
         return;
       }
       const adlType = loadedAdl.allAdlDecls[`${module}.${m}`];
       if(adlType.decl.type_.kind === "type_") {
         return;
       }
-      code.add(`import ${pkg}.${m};`);
+      importStrs.push(`import ${pkg}.${m};`);
     })
   });
+  importStrs.sort().forEach(imp => {
+    code.add(imp);
+  })
 
   // hardcoded common imports
   code.add("");
@@ -406,16 +391,9 @@ async function generateTypescriptService(params: {
    code.add(`import ${imp};`);
   })
   code.add("");
-  // code.add(`import au.com.helixta.adl.runtime.AdlVoid;`);
-  // code.add(`import com.google.gson.JsonElement;`);
-  // code.add(`import java.util.List;`);
-  // code.add(`import java.util.Map;`);
-  // code.add(`import java.util.Optional;`);
   code.add(`import au.com.helixta.service.http.core.HttpUtil.HxContext;`);
   code.add(`import static au.com.onederful.servers.HandlerUtil.adl;`);
   code.add(`import static au.com.helixta.adl.custom.HelixRequestHandlers.handle;`);
-
-
   code.add("");
 
   // generating the service class:
@@ -432,8 +410,6 @@ async function generateTypescriptService(params: {
   code.add("}");
 
   // api endpoints metadata class members:
-  // eg:/** Login a user */
-  //    postLogin: PostFn<LoginReq, LoginResp>;
   for (const apiEntry of apiRequestsStruct.fields) {
     addCode(
       importingHelper,
@@ -449,26 +425,8 @@ async function generateTypescriptService(params: {
 
   // generate constructor
   classBody.add(`public static void register(${serviceclass} impl, HxContext ctx) {`);
-  const ctorArgs = classBody.inner();
-  // ctorArgs
-  //   .add("/** Fetcher over HTTP */")
-  //   .add("http: HttpFetch,")
-  //   .add("/** Base URL of the API endpoints */")
-  //   .add("baseUrl: string,")
-  //   .add("/** Resolver for ADL types */")
-  //   .add("resolver: DeclResolver,")
-  //   .add("/** The authentication token (if any) */")
-  //   .add("authToken: string | undefined,")
-  //   .add("/** Error handler to allow for cross cutting concerns, e.g. authorization errors */")
-  //   .add("handleError: (error: HttpServiceError) => void");
-
-  // classBody.add(") {");
-
+  // const ctorArgs = classBody.inner();
   const ctorBody = classBody.inner();
-
-  // ctorBody.add("super(http, baseUrl, resolver, authToken, handleError);");
-  // ctorBody.add(`const api = this.annotatedApi(${apiReqSn}, ${apiReqMaker}({}));`);
-
   // constructor body, initialisers for api endpoints metadata class members
   for (const apiEntry of apiRequestsStruct.fields) {
     addCode(
@@ -485,14 +443,19 @@ async function generateTypescriptService(params: {
   classBody.add("}");
 
   // // member functions: The main async functions used to operate the API from the app:
-  // // eg:/** Login a user */
-  // //    async login(req: LoginReq): Promise<LoginResp> {
-  // //      return this.postLogin.call(req);
-  // //    }
   // for (const apiEntry of apiRequestsStruct.fields) {
-  //   addCode(importingHelper, loadedAdl, "impl", classBody, apiEntry.typeExpr, apiEntry.name, getComment(apiEntry));
+  //   addCode(
+  //     importingHelper,
+  //     loadedAdl,
+  //     "impl",
+  //     classBody,
+  //     apiEntry.typeExpr,
+  //     apiEntry.name,
+  //     getComment(apiEntry)
+  // );
   // }
   // code.add("");
 
+  const outfile = `${javasrcroot}/${servicepackage.replace(/\./g, "/")}/${serviceclass}.java`
   await fsx.writeFile(outfile, code.write().join('\n'));
 }

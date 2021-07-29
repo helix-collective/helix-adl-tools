@@ -1,5 +1,5 @@
-import { camelCase, pascalCase } from "change-case";
-import { ScopedName, TypeExpr } from "../adl-gen/runtime/sys/adlast";
+import { Annotations, ScopedName, TypeExpr } from "../adl-gen/runtime/sys/adlast";
+
 import { LoadedAdl } from "../util";
 
 export class StringMapSet {
@@ -59,13 +59,8 @@ export class ScopedNameBiMapSet {
 export class ImportingHelper {
   moduleTypes = new ScopedNameBiMapSet();
   javaImports = new Set<string>();
-
   asImportedNames: Map<ScopedName, string> = new Map<ScopedName, string>();
-
   modulesImports: StringMapSet = new StringMapSet();
-
-  importSns: Set<ScopedName> = new Set();
-  importMakeFns: Set<ScopedName> = new Set();
 
   addTypeParams(type: TypeExpr, loadedAdl: LoadedAdl) {
     // recurse into the type params:
@@ -122,6 +117,9 @@ export class ImportingHelper {
         const tp = adlType.decl.type_.value.typeExpr
         this.addType(tp,loadedAdl);
       }
+      if(getJavaCustomType(adlType.decl.annotations)){
+        return
+      }
       // tslint:disable-next-line: no-console
       this.moduleTypes.add(type.typeRef.value);
       this.addTypeParams(type, loadedAdl)
@@ -134,7 +132,6 @@ export class ImportingHelper {
   resolveImports() {
     this.asImportedNames.clear();
 
-
     for (const sn of this.moduleTypes.scopedNames) {
       // tslint:disable-next-line: no-non-null-assertion
       const mods = Array.from(this.moduleTypes.reverse.get(sn.name)!);
@@ -144,33 +141,16 @@ export class ImportingHelper {
         // name is unique across modules: can import and use as-is
         this.asImportedNames.set(sn, sn.name);
         this.modulesImports.add(sn.moduleName, sn.name);
-
-        if(this.importSns.has(sn)) {
-          this.modulesImports.add(sn.moduleName, `sn${pascalCase(sn.name)}`);
-        }
-        if(this.importMakeFns.has(sn)) {
-          this.modulesImports.add(sn.moduleName, `make${pascalCase(sn.name)}`);
-        }
       } else {
-        // name is ambiguous across modules
-        // use "import {name as PascalCaseTheModuleWithName} from blah"
-        const asImportedName = pascalCase(`${sn.moduleName}${sn.name}`);
-        this.asImportedNames.set(sn, asImportedName);
-        this.modulesImports.add(sn.moduleName, `${sn.name} as ${asImportedName}`);
-
-        if(this.importSns.has(sn)) {
-          this.modulesImports.add(sn.moduleName, `sn${pascalCase(sn.name)} as sn${asImportedName}`);
-        }
-        if(this.importSns.has(sn)) {
-          this.modulesImports.add(sn.moduleName, `make${pascalCase(sn.name)} as make${asImportedName}`);
-        }
+        throw new Error("TODO Java import clash - use canonical names");
+        // const asImportedName = `${sn.moduleName}${sn.name}`;
+        // this.asImportedNames.set(sn, asImportedName);
+        // this.modulesImports.add(sn.moduleName, `${sn.name} as ${asImportedName}`);
       }
     }
   }
 
-  /** Get a typeExpr in form as imported (possibly as a different name)
-   * also in the form used by typescript
-   **/
+  /** Get a typeExpr in form as imported (possibly as a different name) */
   asReferencedName(type: TypeExpr, loadedAdl: LoadedAdl): string {
     if (type.typeRef.kind === "primitive") {
 
@@ -222,19 +202,24 @@ export class ImportingHelper {
       }
     }
     if (type.typeRef.kind === "reference") {
+      const adlType = loadedAdl.allAdlDecls[`${type.typeRef.value.moduleName}.${type.typeRef.value.name}`];
+      // Custom Type
+      const customType = getJavaCustomType(adlType.decl.annotations);
+      if(customType) {
+        return customType
+      }
       let asImported = this.asImportedNames.get(type.typeRef.value);
       if (asImported === undefined) {
-        throw new Error(`No asImported name found - ${type.typeRef.value.name}`);
+        throw new Error(`No Reference asImported name found - ${JSON.stringify(type.typeRef.value)}`);
       }
       // If it's an adl `type X = Y`
-      const adlType = loadedAdl.allAdlDecls[`${type.typeRef.value.moduleName}.${type.typeRef.value.name}`];
       if(adlType.decl.type_.kind === "type_") {
         // console.log("ADL type !!", `${type.typeRef.value.moduleName}.${type.typeRef.value.name}` )
         const tp = adlType.decl.type_.value.typeExpr
         asImported = this.asReferencedName(tp,loadedAdl);
         // console.log("ADL type **", asImported)
         if (asImported === undefined) {
-          throw new Error(`No asImported name found - ${type.typeRef.value.name}`);
+          throw new Error(`No Type= asImported name found - ${JSON.stringify(type.typeRef.value)}`);
         }
       }
 
@@ -253,3 +238,31 @@ export class ImportingHelper {
     throw new Error("Unhandled type.typeRef.kind");
   }
 }
+
+function getJavaCustomType(annotations: Annotations): string | null {
+  for (const anno of annotations) {
+    if (anno.key.moduleName === 'adlc.config.java' && anno.key.name === "JavaCustomType") {
+      const ct = anno.value as JavaCustomType;
+      return ct.javaname
+    }
+  }
+  return null;
+}
+
+type JavaCustomType = {
+  helpers: string;
+  javaname: string;
+}
+
+// type AsReference = AsReference_ADL | AsReference_Java
+
+// type AsReference_ADL = {
+//   kind: "adl"
+//   name: string
+// }
+
+// type AsReference_Java = {
+//   kind: "java"
+//   name: string
+//   canonical: string
+// }
