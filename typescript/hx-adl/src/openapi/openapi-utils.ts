@@ -441,7 +441,8 @@ export function schemaFromUnion(_decl: AST.ScopedDecl, union: AST.Union): JsonSc
   const otherFields: AST.Field[] = [];
   union.fields.forEach((f) => {
     if (f.typeExpr.typeRef.kind == "primitive" && f.typeExpr.typeRef.value == "Void") {
-      voidFields.push(f.name);
+      let name = getStringAnnotation(f.annotations, SERIALIZED_NAME) || f.name;
+      voidFields.push(name);
     } else {
       otherFields.push(f);
     }
@@ -596,4 +597,4 @@ export const OPENAPI_EXCLUDE: AST.ScopedName = { moduleName: "common.http", name
 export const OPENAPI_SERVERS: AST.ScopedName = { moduleName: "common.http", name: "OpenApiServers" };
 export const OPENAPI_INFO: AST.ScopedName = { moduleName: "common.http", name: "OpenApiInfo" };
 export const UNIT_TYPEEXPR: AST.TypeExpr = {typeRef:{kind:'reference', value: UNIT}, parameters:[]};
-
+export const SERIALIZED_NAME: AST.ScopedName = { moduleName: "sys.annotations", name: "SerializedName" }
